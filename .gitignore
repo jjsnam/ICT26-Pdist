@@ -4,3 +4,4 @@ add_custom.json
 compile_commands.json
 .cache/
 Pdist/build_out/
+.vscode/
