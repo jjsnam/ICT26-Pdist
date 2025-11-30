@@ -5,3 +5,5 @@ compile_commands.json
 .cache/
 Pdist/build_out/
 .vscode/
+.venv/
+checker/build/
