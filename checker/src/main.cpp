@@ -21,37 +21,42 @@
 bool g_isDevice = false;
 int deviceId = 0;
 
-OperatorDesc CreateOpDesc()
-{
+struct Config {
+    int N = 100;
+    int M = 400;
+    float p = 2.0;
+    aclDataType dataType = ACL_FLOAT;
+    std::string inputPath = "../input/input_x.bin";
+    std::string outputPath = "./output_y.bin";
+} g_conf;
+
+OperatorDesc CreateOpDesc() {
     // define operator
-    std::vector<int64_t> shape{8, 2048};
-    aclDataType dataType = ACL_FLOAT16;
+    std::vector<int64_t> inputShape = {g_conf.N, g_conf.M};
+    int64_t outLen = (int64_t)g_conf.N * (g_conf.N - 1) / 2;
+    std::vector<int64_t> outputShape = {outLen};
+    aclDataType dataType = g_conf.dataType;
     aclFormat format = ACL_FORMAT_ND;
     OperatorDesc opDesc;
-    opDesc.AddInputTensorDesc(dataType, shape.size(), shape.data(), format);
-    opDesc.AddInputTensorDesc(dataType, shape.size(), shape.data(), format);
-    opDesc.AddOutputTensorDesc(dataType, shape.size(), shape.data(), format);
+    opDesc.AddInputTensorDesc(dataType, inputShape.size(), inputShape.data(), format);
+    opDesc.AddOutputTensorDesc(dataType, outputShape.size(), outputShape.data(), format);
     return opDesc;
 }
 
-bool SetInputData(OpRunner &runner)
-{
+bool SetInputData(OpRunner &runner) {
     size_t fileSize = 0;
-    ReadFile("../input/input_x.bin", fileSize, runner.GetInputBuffer<void>(0), runner.GetInputSize(0));
-    ReadFile("../input/input_y.bin", fileSize, runner.GetInputBuffer<void>(1), runner.GetInputSize(1));
+    ReadFile(g_conf.inputPath, fileSize, runner.GetInputBuffer<void>(0), runner.GetInputSize(0));
     INFO_LOG("Set input success");
     return true;
 }
 
-bool ProcessOutputData(OpRunner &runner)
-{
-    WriteFile("../output/output_z.bin", runner.GetOutputBuffer<void>(0), runner.GetOutputSize(0));
+bool ProcessOutputData(OpRunner &runner) {
+    WriteFile(g_conf.outputPath, runner.GetOutputBuffer<void>(0), runner.GetOutputSize(0));
     INFO_LOG("Write output success");
     return true;
 }
 
-void DestroyResource()
-{
+void DestroyResource() {
     bool flag = false;
     if (aclrtResetDevice(deviceId) != ACL_SUCCESS) {
         ERROR_LOG("Reset device %d failed", deviceId);
@@ -69,8 +74,7 @@ void DestroyResource()
     }
 }
 
-bool InitResource()
-{
+bool InitResource() {
     std::string output = "../output";
     if (access(output.c_str(), 0) == -1) {
         int ret = mkdir(output.c_str(), 0700);
@@ -109,8 +113,7 @@ bool InitResource()
     return true;
 }
 
-bool RunOp()
-{
+bool RunOp() {
     // create op desc
     OperatorDesc opDesc = CreateOpDesc();
 
@@ -120,6 +123,8 @@ bool RunOp()
         ERROR_LOG("Init OpRunner failed");
         return false;
     }
+
+    opRunner.setPvalue(g_conf.p);
 
     // Load inputs
     if (!SetInputData(opRunner)) {
@@ -143,8 +148,36 @@ bool RunOp()
     return true;
 }
 
-int main(int argc, char **argv)
-{
+aclDataType ParseDataType(const std::string &dataTypeStr) {
+    if (dataTypeStr == "float32" || dataTypeStr == "float"){
+        return ACL_FLOAT;
+    }
+    return ACL_FLOAT16;
+}
+
+int main(int argc, char **argv) {
+    std::string g_conf_data_size = argv[1];
+    if (g_conf_data_size == "S"){
+        g_conf.N = 100;
+        g_conf.M = 400;
+    }
+    else if (g_conf_data_size == "M"){
+        g_conf.N = 2024;
+        g_conf.M = 3000;
+    }
+    else if (g_conf_data_size == "L"){
+        g_conf.N = 100000;
+        g_conf.M = 100000;
+    }
+    else {
+        ERROR_LOG("Invalid N M size option");
+        return FAILED;
+    }
+    g_conf.p = atof(argv[2]);
+    g_conf.dataType = ParseDataType(argv[3]);
+
+    INFO_LOG("N=%d, M=%d, p=%.1f, dataType=%d", g_conf.N, g_conf.M, g_conf.p, g_conf.dataType);
+
     if (!InitResource()) {
         ERROR_LOG("Init resource failed");
         return FAILED;

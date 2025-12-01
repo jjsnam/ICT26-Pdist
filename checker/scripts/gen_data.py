@@ -43,7 +43,7 @@ def gen_golden_data():
     print(f"Generating Data... Size: ({N}, {M}), Range: ({min_val}, {max_val}), P: {args.p}, Type: {args.data_type}")
     
     input_x = (torch.rand(N, M) * (max_val - min_val) + min_val).to(torch_dtype)
-    golden = torch.pdist(input_x, p=args.p).to(torch_dtype)
+    golden = torch.pdist(input_x.float(), p=args.p).to(torch_dtype)
     
     input_x_np = input_x.numpy().astype(np_dtype)
     golden_np = golden.numpy().astype(np_dtype)

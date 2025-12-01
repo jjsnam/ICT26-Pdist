@@ -12,8 +12,8 @@ class Colors:
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Verify Result")
-    parser.add_argument("output_path", type=str, help="Path to the operator output binary file")
-    parser.add_argument("golden_path", type=str, help="Path to the golden (ground truth) binary file")
+    parser.add_argument("--output_path", type=str, help="Path to the operator output binary file")
+    parser.add_argument("--golden_path", type=str, help="Path to the golden (ground truth) binary file")
     parser.add_argument("--data_type", type=str, default="float", choices=['float', 'float16', 'float32'], help="Data type (float/float32 are treated as float32)")
     return parser.parse_args()
 
@@ -25,8 +25,8 @@ def verify_result(args):
         np_dtype = np.float32
         TOL = 1e-4
     
-    output = np.fromfile(args.output, dtype=np_dtype).reshape(-1)
-    golden = np.fromfile(args.golden, dtype=np_dtype).reshape(-1)
+    output = np.fromfile(args.output_path, dtype=np_dtype).reshape(-1)
+    golden = np.fromfile(args.golden_path, dtype=np_dtype).reshape(-1)
     
     eps = 1e-12
     denominator = np.where(np.abs(golden) < eps, eps, np.abs(golden))

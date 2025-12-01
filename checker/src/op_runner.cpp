@@ -13,7 +13,7 @@
 #include <limits>
 
 #include "acl/acl_op_compiler.h"
-#include "aclnn_add_custom.h"
+#include "aclnn_pdist.h"
 #include "common.h"
 
 using namespace std;
@@ -314,13 +314,13 @@ bool OpRunner::RunOp()
     size_t workspaceSize = 0;
     aclOpExecutor *handle = nullptr;
     auto ret =
-        aclnnAddCustomGetWorkspaceSize(inputTensor_[0], inputTensor_[1], outputTensor_[0], &workspaceSize, &handle);
+        aclnnPdistGetWorkspaceSize(inputTensor_[0], static_cast<double>(pValue_), outputTensor_[0], &workspaceSize, &handle);
     if (ret != ACL_SUCCESS) {
         (void)aclrtDestroyStream(stream);
         ERROR_LOG("Get Operator Workspace failed. error code is %d", static_cast<int32_t>(ret));
         return false;
     }
-    INFO_LOG("Execute aclnnAddCustomGetWorkspaceSize success, workspace size %lu", workspaceSize);
+    INFO_LOG("Execute aclnnPdistGetWorkspaceSize success, workspace size %lu", workspaceSize);
 
     if (workspaceSize != 0) {
         if (aclrtMalloc(&workspace_, workspaceSize, ACL_MEM_MALLOC_HUGE_FIRST) != ACL_SUCCESS) {
@@ -328,7 +328,7 @@ bool OpRunner::RunOp()
         }
     }
 
-    ret = aclnnAddCustom(workspace_, workspaceSize, handle, stream);
+    ret = aclnnPdist(workspace_, workspaceSize, handle, stream);
     if (ret != ACL_SUCCESS) {
         (void)aclrtDestroyStream(stream);
         ERROR_LOG("Execute Operator failed. error code is %d", static_cast<int32_t>(ret));

@@ -68,3 +68,31 @@ fi
 # make
 # cpack
 # verbose append -v
+
+if [ $? -eq 0 ]; then
+    echo "[INFO] Build success! Starting auto-installation..."
+    
+    # 1. 找到生成的 .run 包 (假设在 build_out 目录下)
+    RUN_PKG=$(find ./build_out -maxdepth 1 -name "custom_opp_*.run")
+    
+    if [ -n "$RUN_PKG" ]; then
+        echo "[INFO] Found package: $RUN_PKG"
+        
+        # 2. 静默安装 (--quiet 不弹窗，--install-path 指定覆盖安装)
+        # 注意：这里默认安装到 $ASCEND_HOME_PATH (即 setenv.bash 里的路径)
+        bash $RUN_PKG --quiet
+        
+        if [ $? -eq 0 ]; then
+            echo "[INFO] Operator installed successfully to system path!"
+        else
+            echo "[ERROR] Installation failed!"
+            exit 1
+        fi
+    else
+        echo "[ERROR] .run package not found in build_out!"
+        exit 1
+    fi
+else
+    echo "[ERROR] Build failed, skipping installation."
+    exit 1
+fi

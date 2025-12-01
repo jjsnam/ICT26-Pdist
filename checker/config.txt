@@ -1,4 +1,15 @@
+# ==========================================
+# Pdist Operator Test Configuration
+# ==========================================
+
+# Data Size: S(100,400), M(2024,3000), L(100000,100000)
 data_size=S
+
+# P-norm value: e.g., 1.0, 2.0, inf, -2.0
 p=2.0
+
+# Data Type: float16, float32 (float means float32)
 data_type=float
+
+# Data Range: S(-1~1), M(1~10), L(-1000~1000)
 data_range=S

@@ -37,6 +37,14 @@ public:
     bool Init();
 
     /**
+     * @brief Set pvalue for pdist op
+     * @param [in] pvalue: pvalue
+     */
+    void setPvalue(float p){
+        pValue_ = p;
+    }
+
+    /**
      * @brief Get number of inputs
      * @return number of inputs
      */
@@ -176,6 +184,8 @@ private:
     std::vector<aclTensor *> inputTensor_;
     std::vector<aclTensor *> outputTensor_;
     OperatorDesc *opDesc_;
+
+    float pValue_ = 2.0f;
 };
 
 #endif // OP_RUNNER_H

@@ -1,3 +1,15 @@
+# Update
+
+checker 就是从华为 Sample AclNNInvocation 魔改的版本。
+
+首先 Pdist 里的 build.sh 增加了自动注册脚本，编译成功后会把算子的 API 注册到 vendor 路径下。
+
+然后改了 checker 的内部实现，可以从 config.txt 配置相应参数。
+
+由于算子本身的头文件不会改动，而且是动态链接的，所以整个 checker 编译一次就行。（运行 compile.sh）
+
+之后的测试运行 run.sh 即可。都根据 config.txt 配置相关参数，如果有进阶需求可以查看源码做调整。
+
 ## 目录结构介绍
 ```
 ├── AclNNInvocation             //通过aclnn调用的方式调用AddCustom算子
