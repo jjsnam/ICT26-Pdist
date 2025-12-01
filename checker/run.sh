@@ -1,4 +1,6 @@
 #!/bin/bash
+source config.txt
+
 CURRENT_DIR=$(
     cd $(dirname ${BASH_SOURCE:-$0})
     pwd

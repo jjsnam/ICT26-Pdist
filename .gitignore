@@ -7,3 +7,5 @@ Pdist/build_out/
 .vscode/
 .venv/
 checker/build/
+checker/input/
+checker/output/

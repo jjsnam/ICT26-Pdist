@@ -1,0 +1,4 @@
+data_size=S
+p=2.0
+data_type=float
+data_range=S
