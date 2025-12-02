@@ -2,6 +2,7 @@
 #include "register/tilingdata_base.h"
 
 namespace optiling {
+
 BEGIN_TILING_DATA_DEF(PdistTilingData)
     TILING_DATA_FIELD_DEF(float, pVal); // The p value for Pdist
     TILING_DATA_FIELD_DEF(uint32_t, pType); // The kernel type for different p value
@@ -12,4 +13,5 @@ BEGIN_TILING_DATA_DEF(PdistTilingData)
 END_TILING_DATA_DEF;
 
 REGISTER_TILING_DATA_CLASS(Pdist, PdistTilingData)
-}
+
+} // namespace optiling
