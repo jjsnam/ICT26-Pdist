@@ -1,3 +1,6 @@
+## 主要改动
+  Host侧.cpp文件中的tilingFunc, .h库文件；Kernel侧基本的框架搭建。
+
 ## CMakePresets.json 中的问题
   在ICT2026-PdistPdist/CMakePresets.json文件中，第42行处：
   
