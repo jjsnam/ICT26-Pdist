@@ -334,7 +334,7 @@ bool OpRunner::RunOp()
         ERROR_LOG("Execute Operator failed. error code is %d", static_cast<int32_t>(ret));
         return false;
     }
-    INFO_LOG("Execute aclnnAddCustom success");
+    INFO_LOG("Execute aclnnPdist success");
 
     // The unit of 5000 is ms.
     ret = aclrtSynchronizeStreamWithTimeout(stream, 5000);
