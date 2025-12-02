@@ -1,4 +1,5 @@
 #include "kernel_operator.h"
+#include <cmath>
 
 constexpr int32_t BUFFER_NUM = 1;
 
