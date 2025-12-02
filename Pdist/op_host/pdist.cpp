@@ -2,26 +2,57 @@
 #include "pdist_tiling.h"
 #include "register/op_def_registry.h"
 
-
+// 后续需要修改tiling 目前只是验证编译
 namespace optiling {
 static ge::graphStatus TilingFunc(gert::TilingContext* context)
 {
+    PdistTilingData tiling;
 
-  PdistTilingData tiling;
-  const gert::StorageShape* x1_shape = context->GetInputShape(0);
-  int32_t data_sz = 1;
-  for (int i = 0; i < x1_shape->GetStorageShape().GetDimNum(); i++)
-    data_sz *= x1_shape->GetStorageShape().GetDim(i);
-  tiling.set_size(data_sz);
-  context->SetBlockDim(8);
-  tiling.SaveToBuffer(context->GetRawTilingData()->GetData(), context->GetRawTilingData()->GetCapacity());
-  context->GetRawTilingData()->SetDataSize(tiling.GetDataSize());
+    // 1. 读取输入 shape
+    const gert::StorageShape* x_shape = context->GetInputShape(0);
+    uint32_t N = x_shape->GetStorageShape().GetDim(0);
+    uint32_t D = x_shape->GetStorageShape().GetDim(1);
 
-  return ge::GRAPH_SUCCESS;
+    tiling.set_N(N);
+    tiling.set_D(D);
+
+    // 2. 设置 tile 大小（可根据你的核函数调整）
+    // 推荐每次处理 8 行（N 方向）和全维度（D）
+    uint32_t tileN = 8;
+    uint32_t tileD = D; // 通常 pdist 没必要在 D 方向 tile
+
+    tiling.set_tileN(tileN);
+    tiling.set_tileD(tileD);
+
+    // 3. 计算 blockN / loopN
+    uint32_t loopN = (N + tileN - 1) / tileN;
+    tiling.set_loopN(loopN);
+    tiling.set_blockN(tileN);
+
+    // 4. 计算 blockD / loopD（如果 tileD = D 则 loopD=1）
+    tiling.set_blockD(tileD);
+    tiling.set_loopD(1);
+
+    // 5. workspace
+    tiling.set_workspaceSize(0);
+    tiling.set_reserved(0);
+
+    // 6. 一个 block 处理一个 tile
+    context->SetBlockDim(loopN);
+
+    // 7. 写入 buffer
+    tiling.SaveToBuffer(
+        context->GetRawTilingData()->GetData(),
+        context->GetRawTilingData()->GetCapacity()
+    );
+    context->GetRawTilingData()->SetDataSize(tiling.GetDataSize());
+
+    return ge::GRAPH_SUCCESS;
 }
-}
+}  // namespace optiling
 
-
+// 以下的部分是自动模板自动生成的，主要是输入输出的shape，目前还未进行修改。
+// 
 namespace ge {
 static ge::graphStatus InferShape(gert::InferShapeContext* context)
 {
