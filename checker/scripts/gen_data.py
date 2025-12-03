@@ -65,13 +65,12 @@ def gen_golden_data():
     try:
         if device_str == 'npu':
             torch.npu.synchronize()
-        
-        start_time = time.time()
 
         print(f"[Info] Generating random input on {device_str.upper()}...")
         input_x = (torch.rand(N, M, device=device) * (max_val - min_val) + min_val).to(torch_dtype)
         
         print(f"[Info] Computing pdist (p={args.p}) on {device_str.upper()}...")
+        start_time = time.time()
         if args.data_type == 'float16':
             golden = torch.pdist(input_x.float(), p=args.p).to(torch_dtype)
         else:
