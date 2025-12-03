@@ -63,6 +63,22 @@ public:
 
     __aicore__ inline void Process(){
         switch (this->pType){
+            case 1:{
+                int i = this->i;
+                int j = this->j;
+                for (uint64_t pair = startPair; pair < endPair; pair ++){
+                    if (j >= N){
+                        i ++;
+                        j = i + 1;
+                    }
+                    CopyInFirst(i);
+                    CopyInSecond(j);
+                    ComputeL1(i, j);
+                    CopyOutAligned(pair);
+                    j ++;
+                }
+                break;
+            }
             case 2: {
                 int i = this->i;
                 int j = this->j;
@@ -78,6 +94,38 @@ public:
                     j ++;
                 }
                 break;
+            }
+            case 3:{
+                int i = this->i;
+                int j = this->j;
+                for (uint64_t pair = startPair; pair < endPair; pair ++){
+                    if (j >= N){
+                        i ++;
+                        j = i + 1;
+                    }
+                    CopyInFirst(i);
+                    CopyInSecond(j);
+                    ComputeLinf(i, j);
+                    CopyOutAligned(pair);
+                    j ++;
+                }
+            }
+
+            case 0:{
+                int i = this->i;
+                int j = this->j;
+                float p = this->pVal;
+                for (uint64_t pair = startPair; pair < endPair; pair ++){
+                    if (j >= N){
+                        i ++;
+                        j = i + 1;
+                    }
+                    CopyInFirst(i);
+                    CopyInSecond(j);
+                    ComputeLgeneral(i, j, p);
+                    CopyOutAligned(pair);
+                    j ++;
+                }
             }
             default:
                 break;
@@ -121,8 +169,38 @@ private:
         outQueY.FreeTensor(yLocal);
     }
 
-    __aicore__ inline void ComputeL1(){
-
+    __aicore__ inline void ComputeL1(int i, int j){
+        AscendC::LocalTensor<DTYPE_X> x1Local = inQueFirst.DeQue<DTYPE_X>();
+        AscendC::LocalTensor<DTYPE_X> x2Local = inQueSecond.DeQue<DTYPE_X>();
+        AscendC::LocalTensor<DTYPE_Y> yLocal = outQueY.AllocTensor<DTYPE_Y>();
+        if constexpr (std::is_same_v<DTYPE, half>) {
+            AscendC::LocalTensor<float> sharedTmpBuffer = workQue.AllocTensor<float>();
+            AscendC::LocalTensor<float> castBufferx1 = castQue1.AllocTensor<float>();
+            AscendC::LocalTensor<float> castBufferx2 = castQue2.AllocTensor<float>();
+            uint64_t x1_offset = (1ull * i * this->M) % (this->alignNum);
+            uint64_t x2_offset = (1ull * j * this->M) % (this->alignNum);
+            AscendC::Cast(castBufferx1, x1Local, AscendC::RoundMode::CAST_NONE, this->alignedM);
+            AscendC::Cast(castBufferx2, x2Local, AscendC::RoundMode::CAST_NONE, this->alignedM);
+            AscendC::Sub(castBufferx2[x2_offset], castBufferx2[x2_offset], castBufferx1[x1_offset], this->M);
+            AscendC::Abs(castBufferx2[x2_offset], castBufferx2[x2_offset], this->M);
+            AscendC::ReduceSum(castBufferx2[x2_offset], castBufferx2[x2_offset], sharedTmpBuffer, this->M);
+            AscendC::Cast(yLocal, castBufferx2[x2_offset], AscendC::RoundMode::CAST_NONE, 1);
+            workQue.FreeTensor(sharedTmpBuffer);
+            workQue.FreeTensor(castBufferx1);
+            workQue.FreeTensor(castBufferx2);
+            
+        }
+        else{
+            AscendC::Sub(x2Local, x2Local, x1Local, this->M);
+            AscendC::LocalTensor<DTYPE_Y> sharedTmpBuffer = workQue.AllocTensor<DTYPE_Y>();
+            AscendC::Abs(x2Local, x2Local, this->M);
+            AscendC::ReduceSum(yLocal, x2Local, sharedTmpBuffer, this->M);
+            workQue.FreeTensor(sharedTmpBuffer);
+        }
+        outQueY.EnQue<DTYPE_Y>(yLocal);
+        inQueFirst.FreeTensor(x1Local);
+        inQueSecond.FreeTensor(x2Local);
+        
     }
 
     __aicore__ inline void ComputeL2(int i, int j){
@@ -159,12 +237,111 @@ private:
         inQueSecond.FreeTensor(x2Local);
     }
 
-    __aicore__ inline void ComputeLinf(){
+    __aicore__ inline void ComputeLinf(int i, int j){
+        AscendC::LocalTensor<DTYPE_X> x1Local = inQueFirst.DeQue<DTYPE_X>();
+        AscendC::LocalTensor<DTYPE_X> x2Local = inQueSecond.DeQue<DTYPE_X>();
+        AscendC::LocalTensor<DTYPE_Y> yLocal = outQueY.AllocTensor<DTYPE_Y>();
 
+        if constexpr (std::is_same_v<DTYPE, half>) {
+            AscendC::LocalTensor<float> sharedTmpBuffer = workQue.AllocTensor<float>();
+            AscendC::LocalTensor<float> castBufferx1 = castQue1.AllocTensor<float>();
+            AscendC::LocalTensor<float> castBufferx2 = castQue2.AllocTensor<float>();
+            uint64_t x1_offset = (1ull * i * this->M) % (this->alignNum);
+            uint64_t x2_offset = (1ull * j * this->M) % (this->alignNum);
+            AscendC::Cast(castBufferx1, x1Local, AscendC::RoundMode::CAST_NONE, this->alignedM);
+            AscendC::Cast(castBufferx2, x2Local, AscendC::RoundMode::CAST_NONE, this->alignedM);
+            AscendC::Sub(castBufferx2[x2_offset], castBufferx2[x2_offset], castBufferx1[x1_offset], this->M);
+            AscendC::Abs(castBufferx2[x2_offset], castBufferx2[x2_offset], this->M);
+            AscendC::ReduceMax(castBufferx2[x2_offset], castBufferx2[x2_offset], sharedTmpBuffer, this->M);
+            AscendC::Cast(yLocal, castBufferx2[x2_offset], AscendC::RoundMode::CAST_NONE, 1);
+            workQue.FreeTensor(sharedTmpBuffer);
+            workQue.FreeTensor(castBufferx1);
+            workQue.FreeTensor(castBufferx2);
+            
+        }
+        else{
+            AscendC::Sub(x2Local, x2Local, x1Local, this->M);
+            AscendC::LocalTensor<DTYPE_Y> sharedTmpBuffer = workQue.AllocTensor<DTYPE_Y>();
+            AscendC::Abs(x2Local, x2Local, this->M);
+            AscendC::ReduceMax(yLocal, x2Local, sharedTmpBuffer, this->M);
+            workQue.FreeTensor(sharedTmpBuffer);
+        }
+        outQueY.EnQue<DTYPE_Y>(yLocal);
+        inQueFirst.FreeTensor(x1Local);
+        inQueSecond.FreeTensor(x2Local);
+        
     }
 
-    __aicore__ inline void ComputeLgeneral(){
 
+    __aicore__ inline void ComputeLgeneral(int i, int j, float p){
+        AscendC::LocalTensor<DTYPE_X> x1Local = inQueFirst.DeQue<DTYPE_X>();
+        AscendC::LocalTensor<DTYPE_X> x2Local = inQueSecond.DeQue<DTYPE_X>();
+        AscendC::LocalTensor<DTYPE_Y> yLocal = outQueY.AllocTensor<DTYPE_Y>();
+
+        if constexpr (std::is_same_v<DTYPE, half>) {
+            // 为 float16 情况，cast 到 float 做计算
+            AscendC::LocalTensor<float> sharedTmpBuffer = workQue.AllocTensor<float>();
+            AscendC::LocalTensor<float> castBufferx1 = castQue1.AllocTensor<float>();
+            AscendC::LocalTensor<float> castBufferx2 = castQue2.AllocTensor<float>();
+
+            uint64_t x1_offset = (1ull * i * this->M) % (this->alignNum);
+            uint64_t x2_offset = (1ull * j * this->M) % (this->alignNum);
+
+            AscendC::Cast(castBufferx1, x1Local, AscendC::RoundMode::CAST_NONE, this->alignedM);
+            AscendC::Cast(castBufferx2, x2Local, AscendC::RoundMode::CAST_NONE, this->alignedM);
+
+            // 计算差值
+            AscendC::Sub(castBufferx2[x2_offset], castBufferx2[x2_offset], castBufferx1[x1_offset], this->M);
+            AscendC::Abs(castBufferx2[x2_offset], castBufferx2[x2_offset], this->M);
+
+            // log/exp 方法计算 pow(x, p)
+            AscendC::Log(castBufferx2[x2_offset], castBufferx2[x2_offset], this->M);
+            AscendC::Muls(castBufferx2[x2_offset], castBufferx2[x2_offset], p, this->M);
+            AscendC::Exp(castBufferx2[x2_offset], castBufferx2[x2_offset], this->M);
+
+            // 求和
+            AscendC::ReduceSum(castBufferx2[x2_offset], castBufferx2[x2_offset], sharedTmpBuffer, this->M);
+
+            // 求 p 次根
+            AscendC::Log(castBufferx2[x2_offset], castBufferx2[x2_offset], 1);
+            AscendC::Muls(castBufferx2[x2_offset], castBufferx2[x2_offset], 1.0f/p, 1);
+            AscendC::Exp(castBufferx2[x2_offset], castBufferx2[x2_offset], 1);
+
+            AscendC::Cast(yLocal, castBufferx2[x2_offset], AscendC::RoundMode::CAST_NONE, 1);
+
+            // 释放临时 tensor
+            workQue.FreeTensor(sharedTmpBuffer);
+            workQue.FreeTensor(castBufferx1);
+            workQue.FreeTensor(castBufferx2);
+
+        }
+        else {
+            // float32
+            AscendC::Sub(x2Local, x2Local, x1Local, this->M);
+            AscendC::Abs(x2Local, x2Local, this->M);
+
+            AscendC::LocalTensor<DTYPE_Y> sharedTmpBuffer = workQue.AllocTensor<DTYPE_Y>();
+
+            DTYPE_Y p_h = static_cast<DTYPE_Y>(p);
+            DTYPE_Y inv_p_h = static_cast<DTYPE_Y>(1.0f / p);
+
+            AscendC::Log(x2Local, x2Local, this->M);
+            AscendC::Muls(x2Local, x2Local, p_h, this->M);
+            AscendC::Exp(x2Local, x2Local, this->M);
+
+            AscendC::ReduceSum(yLocal, x2Local, sharedTmpBuffer, this->M);
+
+            AscendC::Log(yLocal, yLocal, 1);
+            AscendC::Muls(yLocal, yLocal, inv_p_h, 1);
+            AscendC::Exp(yLocal, yLocal, 1);
+
+            workQue.FreeTensor(sharedTmpBuffer);
+
+        }
+
+        outQueY.EnQue<DTYPE_Y>(yLocal);
+        inQueFirst.FreeTensor(x1Local);
+        inQueSecond.FreeTensor(x2Local);
     }
 
 private:
