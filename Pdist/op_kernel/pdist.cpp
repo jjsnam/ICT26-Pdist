@@ -2,6 +2,7 @@
 
 constexpr int32_t BUFFER_NUM = 1;
 
+template<typename DTYPE>
 class KernelPdist{
 public:
     __aicore__ inline KernelPdist() {}
@@ -49,7 +50,8 @@ public:
         pipe.InitBuffer(inQueSecond, BUFFER_NUM, this->M * sizeof(DTYPE_X));
         pipe.InitBuffer(outQueY, BUFFER_NUM, 1 * sizeof(DTYPE_Y));
         pipe.InitBuffer(outQueBuffer, BUFFER_NUM, this->M * sizeof(DTYPE_Y));
-        pipe.InitBuffer(workQue, 1, this->M * sizeof(DTYPE_Y));
+        pipe.InitBuffer(workQue, 1, this->M * sizeof(float)); // shared work buffer for calculation
+        pipe.InitBuffer(castQue, 1, this->M * sizeof(float)); // shared cast buffer
 
         AscendC::LocalTensor<DTYPE_Y> outputBuffer = outQueBuffer.AllocTensor<DTYPE_Y>();
         outQueBuffer.EnQue(outputBuffer);
@@ -124,15 +126,29 @@ private:
         AscendC::LocalTensor<DTYPE_X> x1Local = inQueFirst.DeQue<DTYPE_X>();
         AscendC::LocalTensor<DTYPE_X> x2Local = inQueSecond.DeQue<DTYPE_X>();
         AscendC::LocalTensor<DTYPE_Y> yLocal = outQueY.AllocTensor<DTYPE_Y>();
-        AscendC::LocalTensor<DTYPE_Y> sharedTmpBuffer = workQue.AllocTensor<DTYPE_Y>();
         AscendC::Sub(x2Local, x1Local, x2Local, this->M);
-        AscendC::Mul(x2Local, x2Local, x2Local, this->M);
-        AscendC::ReduceSum(yLocal, x2Local, sharedTmpBuffer, this->M);
-        AscendC::Sqrt(yLocal, yLocal, 1);
+        if constexpr (std::is_same_v<DTYPE, half>){ // float16
+            AscendC::LocalTensor<float> sharedTmpBuffer = workQue.AllocTensor<float>();
+            AscendC::LocalTensor<float> castBuffer = castQue.AllocTensor<float>();
+            AscendC::Cast(castBuffer, x2Local, AscendC::RoundMode::CAST_NONE, this->M);
+            AscendC::Mul(castBuffer, castBuffer, castBuffer, this->M);
+            AscendC::ReduceSum(castBuffer, castBuffer, sharedTmpBuffer, this->M);
+            AscendC::Sqrt(castBuffer, castBuffer, 1);
+            // AscendC::printf("L2 distance (float16) computed: %f\n", castBuffer.GetValue(0));
+            AscendC::Cast(yLocal, castBuffer, AscendC::RoundMode::CAST_NONE, 1);
+            castQue.FreeTensor(castBuffer);
+            workQue.FreeTensor(sharedTmpBuffer);
+        }
+        else{ // float32
+            AscendC::LocalTensor<DTYPE_Y> sharedTmpBuffer = workQue.AllocTensor<DTYPE_Y>();
+            AscendC::Mul(x2Local, x2Local, x2Local, this->M);
+            AscendC::ReduceSum(yLocal, x2Local, sharedTmpBuffer, this->M);
+            AscendC::Sqrt(yLocal, yLocal, 1);
+            workQue.FreeTensor(sharedTmpBuffer);
+        }
         outQueY.EnQue<DTYPE_Y>(yLocal);
         inQueFirst.FreeTensor(x1Local);
         inQueSecond.FreeTensor(x2Local);
-        workQue.FreeTensor(sharedTmpBuffer);
     }
 
     __aicore__ inline void ComputeLinf(){
@@ -154,7 +170,7 @@ private:
     AscendC::TPipe pipe;
     AscendC::TQue<AscendC::TPosition::VECIN, BUFFER_NUM> inQueFirst, inQueSecond;
     AscendC::TQue<AscendC::TPosition::VECOUT, BUFFER_NUM> outQueY, outQueBuffer;
-    AscendC::TQue<AscendC::TPosition::VECCALC, 1> workQue;
+    AscendC::TQue<AscendC::TPosition::VECCALC, 1> workQue, castQue;
     AscendC::GlobalTensor<DTYPE_X> xGm;
     AscendC::GlobalTensor<DTYPE_Y> yGm;
 };
@@ -162,7 +178,14 @@ private:
 extern "C" __global__ __aicore__ void pdist(GM_ADDR x, GM_ADDR y, GM_ADDR workspace, GM_ADDR tiling) {
     GET_TILING_DATA(tiling_data, tiling);
     
-    KernelPdist op;
-    op.Init(x, y, tiling_data.pType, tiling_data.pVal, tiling_data.N, tiling_data.M, tiling_data.alignNum);
-    op.Process();
+    if (tiling_data.dataType == DT_FLOAT16){
+        KernelPdist<half> op;
+        op.Init(x, y, tiling_data.pType, tiling_data.pVal, tiling_data.N, tiling_data.M, tiling_data.alignNum);
+        op.Process();
+    }
+    else{
+        KernelPdist<float> op;
+        op.Init(x, y, tiling_data.pType, tiling_data.pVal, tiling_data.N, tiling_data.M, tiling_data.alignNum);
+        op.Process();
+    }
 }

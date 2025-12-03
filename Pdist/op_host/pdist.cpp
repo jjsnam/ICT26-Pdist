@@ -18,6 +18,7 @@ static ge::graphStatus TilingFunc(gert::TilingContext* context)
     int typeSize = dataType == ge::DT_FLOAT16 ? 2 : 4;
     int alignNum = alignSizeB / typeSize;
     tiling.set_alignNum(alignNum);
+    tiling.set_dataType(dataType);
 
     // Dealing with attr p
     const gert::RuntimeAttrs * attrs = context->GetAttrs();
