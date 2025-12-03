@@ -1,11 +1,14 @@
 #include "kernel_operator.h"
-// #include <cmath>
 
 constexpr int32_t BUFFER_NUM = 1;
 
 class KernelPdist{
 public:
     __aicore__ inline KernelPdist() {}
+    __aicore__ inline ~KernelPdist() {
+        AscendC::LocalTensor<DTYPE_Y> outputBuffer = outQueBuffer.DeQue<DTYPE_Y>();
+        outQueBuffer.FreeTensor(outputBuffer);
+    }
     __aicore__ inline void Init(GM_ADDR x, GM_ADDR y, uint32_t pType, float pVal, uint32_t N, uint32_t M, uint32_t alignNum) {
         this->blockIdx = AscendC::GetBlockIdx();
         this->N = N;
@@ -36,20 +39,12 @@ public:
         }
         this->i = ans;
         this->j = startPair - 1ull * ans * (2 * N - ans - 1) / 2 + ans + 1;
-        // assert(this->i * N + this->j == startPair);
-        // AscendC::printf("startPair=%llu, endPair=%llu, i=%d, j=%d, N=%d\n", startPair, endPair, this->i, this->j, N);
-        // uint64_t t = 1ll * this->i * (2 * N - this->i - 1) / 2 + this->j - this->i;
-        // uint64_t t_ = 1ll * (this->i) * (2 * N - this->i - 1) / 2;
-        // if (t != startPair){
-        //     AscendC::printf("Error in computing start i,j: t=%llu\n T_=%llu\n", t, t_);
-        //     assert(0);
-        // }
 
         this->pType = pType;
         this->pVal = pVal;
         
         xGm.SetGlobalBuffer((__gm__ DTYPE_X *)x, 1ull * N * M);
-        yGm.SetGlobalBuffer((__gm__ DTYPE_Y *)y, 1ull * N * (N - 1) / 2);
+        yGm.SetGlobalBuffer((__gm__ DTYPE_Y *)y, (1ull * N * (N - 1) / 2 + alignNum - 1) / alignNum * alignNum); // aligned output
         pipe.InitBuffer(inQueFirst, BUFFER_NUM, this->M * sizeof(DTYPE_X));
         pipe.InitBuffer(inQueSecond, BUFFER_NUM, this->M * sizeof(DTYPE_X));
         pipe.InitBuffer(outQueY, BUFFER_NUM, 1 * sizeof(DTYPE_Y));
@@ -64,7 +59,6 @@ public:
     __aicore__ inline void Process(){
         switch (this->pType){
             case 2: {
-                // AscendC::printf("Block %d processing L2 norm from pair %llu to %llu\n", this->blockIdx, this->startPair, this->endPair);
                 int i = this->i;
                 int j = this->j;
                 for (uint64_t pair = startPair; pair < endPair; pair ++){
@@ -76,7 +70,6 @@ public:
                     CopyInSecond(j);
                     ComputeL2();
                     CopyOutAligned(pair);
-                    // CopyOut(i, j);
                     j ++;
                 }
                 break;
@@ -113,9 +106,11 @@ private:
         this->bufferNum ++;
         if (this->bufferNum == this->alignNum || pair == this->endPair - 1){
             uint64_t startIdx = pair - this->bufferNum + 1;
-            // AscendC::printf(outputBuffer, this->bufferNum);
-            AscendC::DataCopy(yGm[startIdx], outputBuffer, this->alignNum/* this->bufferNum */);
+            AscendC::DataCopy(yGm[startIdx], outputBuffer, this->alignNum);
             this->bufferNum = 0;
+        }
+        else if (pair == this->endPair - 1){
+
         }
         outQueBuffer.EnQue(outputBuffer);
         outQueY.FreeTensor(yLocal);
@@ -134,8 +129,6 @@ private:
         AscendC::Mul(x2Local, x2Local, x2Local, this->M);
         AscendC::ReduceSum(yLocal, x2Local, sharedTmpBuffer, this->M);
         AscendC::Sqrt(yLocal, yLocal, 1);
-        float val = (float)yLocal.GetValue(0);
-        // AscendC::printf("[Kernel] i=%d, j=%d, res=%f\n", i, j, val);
         outQueY.EnQue<DTYPE_Y>(yLocal);
         inQueFirst.FreeTensor(x1Local);
         inQueSecond.FreeTensor(x2Local);

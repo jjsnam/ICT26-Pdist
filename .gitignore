@@ -9,3 +9,4 @@ Pdist/build_out/
 checker/build/
 checker/input/
 checker/output/
+**/PROF*/
