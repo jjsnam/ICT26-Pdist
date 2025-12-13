@@ -9,7 +9,7 @@ data_size=M
 p=2.0
 
 # Data Type: float16, float32 (float means float32)
-data_type=float16
+data_type=float32
 
 # Data Range: S(-1~1), M(1~10), L(-1000~1000)
 data_range=S

@@ -134,13 +134,13 @@ public:
 private:
     __aicore__ inline void CopyInFirst(int i){
         AscendC::LocalTensor<DTYPE_X> x1Local = inQueFirst.AllocTensor<DTYPE_X>();
-        AscendC::DataCopy(x1Local, xGm[i * this->M / this->alignNum * this->alignNum], this->alignedM);
+        AscendC::DataCopy(x1Local, xGm[1ull * i * this->M / this->alignNum * this->alignNum], this->alignedM);
         inQueFirst.EnQue(x1Local);
     }
 
     __aicore__ inline void CopyInSecond(int j){
         AscendC::LocalTensor<DTYPE_X> x2Local = inQueSecond.AllocTensor<DTYPE_X>();
-        AscendC::DataCopy(x2Local, xGm[j * this->M / this->alignNum * this->alignNum], this->alignedM);
+        AscendC::DataCopy(x2Local, xGm[1ull * j * this->M / this->alignNum * this->alignNum], this->alignedM);
         inQueSecond.EnQue(x2Local);
     }
 
@@ -160,9 +160,6 @@ private:
             uint64_t startIdx = pair - this->bufferNum + 1;
             AscendC::DataCopy(yGm[startIdx], outputBuffer, this->alignNum);
             this->bufferNum = 0;
-        }
-        else if (pair == this->endPair - 1){
-
         }
         outQueBuffer.EnQue(outputBuffer);
         outQueY.FreeTensor(yLocal);
