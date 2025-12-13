@@ -53,9 +53,10 @@ public:
         pipe.InitBuffer(outQueY, BUFFER_NUM, 1 * sizeof(DTYPE_Y));
         pipe.InitBuffer(outQueBuffer, BUFFER_NUM, this->M * sizeof(DTYPE_Y));
         pipe.InitBuffer(workQue, 1, this->M * sizeof(float)); // shared work buffer for calculation
-        pipe.InitBuffer(castQue1, 1, this->alignedM * sizeof(float)); // shared cast buffer
-        pipe.InitBuffer(castQue2, 1, this->alignedM * sizeof(float)); // shared cast buffer
-
+        if constexpr (std::is_same_v<DTYPE, half>){
+            pipe.InitBuffer(castQue1, 1, this->alignedM * sizeof(float)); // shared cast buffer
+            pipe.InitBuffer(castQue2, 1, this->alignedM * sizeof(float)); // shared cast buffer
+        }
         AscendC::LocalTensor<DTYPE_Y> outputBuffer = outQueBuffer.AllocTensor<DTYPE_Y>();
         outQueBuffer.EnQue(outputBuffer);
         this->bufferNum = 0;
@@ -325,7 +326,8 @@ private:
     AscendC::TPipe pipe;
     AscendC::TQue<AscendC::TPosition::VECIN, BUFFER_NUM> inQueFirst, inQueSecond;
     AscendC::TQue<AscendC::TPosition::VECOUT, BUFFER_NUM> outQueY, outQueBuffer;
-    AscendC::TQue<AscendC::TPosition::VECCALC, 1> workQue, castQue1, castQue2;
+    AscendC::TQue<AscendC::TPosition::VECCALC, 1> workQue;
+    AscendC::TQue<AscendC::TPosition::VECCALC, 1> castQue1, castQue2;
     AscendC::GlobalTensor<DTYPE_X> xGm;
     AscendC::GlobalTensor<DTYPE_Y> yGm;
 };
