@@ -142,11 +142,22 @@ private:
         AscendC::LocalTensor<DTYPE_X> x1Local = inQueFirst.AllocTensor<DTYPE_X>();
         AscendC::DataCopy(x1Local, xGm[1ull * i * this->M / this->alignNum * this->alignNum], this->alignedM);
         inQueFirst.EnQue(x1Local);
+        if constexpr (std::is_same_v<DTYPE, half>) {
+            x1Local = inQueFirst.DeQue<DTYPE_X>();
+            AscendC::LocalTensor<float> castBufferx1 = castQue1.AllocTensor<float>();
+            AscendC::Cast(castBufferx1, x1Local, AscendC::RoundMode::CAST_NONE, this->alignedM);
+            castQue1.EnQue(castBufferx1);
+            inQueFirst.EnQue(x1Local);
+        }
     }
 
     __aicore__ inline void ClearInFirst(){
         AscendC::LocalTensor<DTYPE_X> inputX = inQueFirst.DeQue<DTYPE_X>();
         inQueFirst.FreeTensor(inputX);
+        if constexpr (std::is_same_v<DTYPE, half>) {
+            AscendC::LocalTensor<float> castBufferx1 = castQue1.DeQue<float>();
+            castQue1.FreeTensor(castBufferx1);
+        }
     }
 
     __aicore__ inline void CopyInSecond(int j){
@@ -182,17 +193,16 @@ private:
         AscendC::LocalTensor<DTYPE_Y> yLocal = outQueY.AllocTensor<DTYPE_Y>();
         if constexpr (std::is_same_v<DTYPE, half>){ // float16
             AscendC::LocalTensor<float> sharedTmpBuffer = workQue.AllocTensor<float>();
-            AscendC::LocalTensor<float> castBufferx1 = castQue1.AllocTensor<float>();
+            AscendC::LocalTensor<float> castBufferx1 = castQue1.DeQue<float>();
             AscendC::LocalTensor<float> castBufferx2 = castQue2.AllocTensor<float>();
             uint64_t x1_offset = (1ull * i * this->M) % (this->alignNum);
             uint64_t x2_offset = (1ull * j * this->M) % (this->alignNum);
-            AscendC::Cast(castBufferx1, x1Local, AscendC::RoundMode::CAST_NONE, this->alignedM);
             AscendC::Cast(castBufferx2, x2Local, AscendC::RoundMode::CAST_NONE, this->alignedM);
             AscendC::Sub(castBufferx2[x2_offset], castBufferx2[x2_offset], castBufferx1[x1_offset], this->M);
             AscendC::Abs(castBufferx2[x2_offset], castBufferx2[x2_offset], this->M);
             AscendC::ReduceSum(castBufferx2[x2_offset], castBufferx2[x2_offset], sharedTmpBuffer, this->M);
             AscendC::Cast(yLocal, castBufferx2[x2_offset], AscendC::RoundMode::CAST_NONE, 1);
-            castQue1.FreeTensor(castBufferx1);
+            castQue1.EnQue(castBufferx1);
             castQue2.FreeTensor(castBufferx2);
             workQue.FreeTensor(sharedTmpBuffer);
         }
@@ -214,18 +224,17 @@ private:
         AscendC::LocalTensor<DTYPE_Y> yLocal = outQueY.AllocTensor<DTYPE_Y>();
         if constexpr (std::is_same_v<DTYPE, half>){ // float16
             AscendC::LocalTensor<float> sharedTmpBuffer = workQue.AllocTensor<float>();
-            AscendC::LocalTensor<float> castBufferx1 = castQue1.AllocTensor<float>();
+            AscendC::LocalTensor<float> castBufferx1 = castQue1.DeQue<float>();
             AscendC::LocalTensor<float> castBufferx2 = castQue2.AllocTensor<float>();
             uint64_t x1_offset = (1ull * i * this->M) % (this->alignNum);
             uint64_t x2_offset = (1ull * j * this->M) % (this->alignNum);
-            AscendC::Cast(castBufferx1, x1Local, AscendC::RoundMode::CAST_NONE, this->alignedM);
             AscendC::Cast(castBufferx2, x2Local, AscendC::RoundMode::CAST_NONE, this->alignedM);
             AscendC::Sub(castBufferx2[x2_offset], castBufferx2[x2_offset], castBufferx1[x1_offset], this->M);
             AscendC::Mul(castBufferx2[x2_offset], castBufferx2[x2_offset], castBufferx2[x2_offset], this->M);
             AscendC::ReduceSum(castBufferx2[x2_offset], castBufferx2[x2_offset], sharedTmpBuffer, this->M);
             AscendC::Sqrt(castBufferx2[x2_offset], castBufferx2[x2_offset], 1);
             AscendC::Cast(yLocal, castBufferx2[x2_offset], AscendC::RoundMode::CAST_NONE, 1);
-            castQue1.FreeTensor(castBufferx1);
+            castQue1.EnQue(castBufferx1);
             castQue2.FreeTensor(castBufferx2);
             workQue.FreeTensor(sharedTmpBuffer);
         }
@@ -248,17 +257,16 @@ private:
         AscendC::LocalTensor<DTYPE_Y> yLocal = outQueY.AllocTensor<DTYPE_Y>();
         if constexpr (std::is_same_v<DTYPE, half>){ // float16
             AscendC::LocalTensor<float> sharedTmpBuffer = workQue.AllocTensor<float>();
-            AscendC::LocalTensor<float> castBufferx1 = castQue1.AllocTensor<float>();
+            AscendC::LocalTensor<float> castBufferx1 = castQue1.DeQue<float>();
             AscendC::LocalTensor<float> castBufferx2 = castQue2.AllocTensor<float>();
             uint64_t x1_offset = (1ull * i * this->M) % (this->alignNum);
             uint64_t x2_offset = (1ull * j * this->M) % (this->alignNum);
-            AscendC::Cast(castBufferx1, x1Local, AscendC::RoundMode::CAST_NONE, this->alignedM);
             AscendC::Cast(castBufferx2, x2Local, AscendC::RoundMode::CAST_NONE, this->alignedM);
             AscendC::Sub(castBufferx2[x2_offset], castBufferx2[x2_offset], castBufferx1[x1_offset], this->M);
             AscendC::Abs(castBufferx2[x2_offset], castBufferx2[x2_offset], this->M);
             AscendC::ReduceMax(castBufferx2[x2_offset], castBufferx2[x2_offset], sharedTmpBuffer, this->M);
             AscendC::Cast(yLocal, castBufferx2[x2_offset], AscendC::RoundMode::CAST_NONE, 1);
-            castQue1.FreeTensor(castBufferx1);
+            castQue1.EnQue(castBufferx1);
             castQue2.FreeTensor(castBufferx2);
             workQue.FreeTensor(sharedTmpBuffer);
         }
@@ -280,11 +288,10 @@ private:
         AscendC::LocalTensor<DTYPE_Y> yLocal = outQueY.AllocTensor<DTYPE_Y>();
         if constexpr (std::is_same_v<DTYPE, half>){ // float16
             AscendC::LocalTensor<float> sharedTmpBuffer = workQue.AllocTensor<float>();
-            AscendC::LocalTensor<float> castBufferx1 = castQue1.AllocTensor<float>();
+            AscendC::LocalTensor<float> castBufferx1 = castQue1.DeQue<float>();
             AscendC::LocalTensor<float> castBufferx2 = castQue2.AllocTensor<float>();
             uint64_t x1_offset = (1ull * i * this->M) % (this->alignNum);
             uint64_t x2_offset = (1ull * j * this->M) % (this->alignNum);
-            AscendC::Cast(castBufferx1, x1Local, AscendC::RoundMode::CAST_NONE, this->alignedM);
             AscendC::Cast(castBufferx2, x2Local, AscendC::RoundMode::CAST_NONE, this->alignedM);
             AscendC::Sub(castBufferx2[x2_offset], castBufferx2[x2_offset], castBufferx1[x1_offset], this->M);
             AscendC::Abs(castBufferx2[x2_offset], castBufferx2[x2_offset], this->M);
@@ -294,7 +301,7 @@ private:
             AscendC::ReduceSum(castBufferx2[x2_offset], castBufferx2[x2_offset], sharedTmpBuffer, this->M);
             AscendC::Power(castBufferx2[x2_offset], castBufferx2[x2_offset], Rp, 1);
             AscendC::Cast(yLocal, castBufferx2[x2_offset], AscendC::RoundMode::CAST_NONE, 1);
-            castQue1.FreeTensor(castBufferx1);
+            castQue1.EnQue(castBufferx1);
             castQue2.FreeTensor(castBufferx2);
             workQue.FreeTensor(sharedTmpBuffer);
         }
