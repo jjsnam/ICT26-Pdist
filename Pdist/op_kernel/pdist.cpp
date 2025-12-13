@@ -9,6 +9,7 @@ public:
     __aicore__ inline ~KernelPdist() {
         AscendC::LocalTensor<DTYPE_Y> outputBuffer = outQueBuffer.DeQue<DTYPE_Y>();
         outQueBuffer.FreeTensor(outputBuffer);
+        ClearInFirst();
     }
     __aicore__ inline void Init(GM_ADDR x, GM_ADDR y, uint32_t pType, float pVal, uint32_t N, uint32_t M, uint32_t alignNum) {
         this->blockIdx = AscendC::GetBlockIdx();
@@ -65,64 +66,68 @@ public:
             case 0: {
                 int i = this->i;
                 int j = this->j;
-                for (uint64_t pair = startPair; pair < endPair; pair ++){
+                CopyInFirst(i);
+                for (uint64_t pair = startPair; pair < endPair; pair ++, j ++){
                     if (j >= N){
                         i ++;
                         j = i + 1;
+                        ClearInFirst();
+                        CopyInFirst(i);
                     }
-                    CopyInFirst(i);
                     CopyInSecond(j);
                     ComputeLgeneral(i, j, pVal);
                     CopyOutAligned(pair);
-                    j ++;
                 }
                 break;
             }
             case 1: {
                 int i = this->i;
                 int j = this->j;
-                for (uint64_t pair = startPair; pair < endPair; pair ++){
+                CopyInFirst(i);
+                for (uint64_t pair = startPair; pair < endPair; pair ++, j ++){
                     if (j >= N){
                         i ++;
                         j = i + 1;
+                        ClearInFirst();
+                        CopyInFirst(i);
                     }
-                    CopyInFirst(i);
                     CopyInSecond(j);
                     ComputeL1(i, j);
                     CopyOutAligned(pair);
-                    j ++;
                 }
                 break;
             }
             case 2: {
                 int i = this->i;
                 int j = this->j;
-                for (uint64_t pair = startPair; pair < endPair; pair ++){
+                CopyInFirst(i);
+                for (uint64_t pair = startPair; pair < endPair; pair ++, j ++){
                     if (j >= N){
                         i ++;
                         j = i + 1;
+                        ClearInFirst();
+                        CopyInFirst(i);
                     }
-                    CopyInFirst(i);
                     CopyInSecond(j);
                     ComputeL2(i, j);
                     CopyOutAligned(pair);
-                    j ++;
                 }
                 break;
             }
             case 3: {
                 int i = this->i;
                 int j = this->j;
-                for (uint64_t pair = startPair; pair < endPair; pair ++){
+                CopyInFirst(i);
+                for (uint64_t pair = startPair; pair < endPair; pair ++, j ++){
                     if (j >= N){
                         i ++;
                         j = i + 1;
+                        ClearInFirst();
+                        CopyInFirst(i);
                     }
-                    CopyInFirst(i);
                     CopyInSecond(j);
                     ComputeLinf(i, j);
                     CopyOutAligned(pair);
-                    j ++;
                 }
                 break;
             }
@@ -136,6 +141,11 @@ private:
         AscendC::LocalTensor<DTYPE_X> x1Local = inQueFirst.AllocTensor<DTYPE_X>();
         AscendC::DataCopy(x1Local, xGm[1ull * i * this->M / this->alignNum * this->alignNum], this->alignedM);
         inQueFirst.EnQue(x1Local);
+    }
+
+    __aicore__ inline void ClearInFirst(){
+        AscendC::LocalTensor<DTYPE_X> inputX = inQueFirst.DeQue<DTYPE_X>();
+        inQueFirst.FreeTensor(inputX);
     }
 
     __aicore__ inline void CopyInSecond(int j){
@@ -193,7 +203,7 @@ private:
             workQue.FreeTensor(sharedTmpBuffer);
         }
         outQueY.EnQue<DTYPE_Y>(yLocal);
-        inQueFirst.FreeTensor(x1Local);
+        inQueFirst.EnQue(x1Local);
         inQueSecond.FreeTensor(x2Local);
     }
 
@@ -227,7 +237,7 @@ private:
             workQue.FreeTensor(sharedTmpBuffer);
         }
         outQueY.EnQue<DTYPE_Y>(yLocal);
-        inQueFirst.FreeTensor(x1Local);
+        inQueFirst.EnQue(x1Local);
         inQueSecond.FreeTensor(x2Local);
     }
 
@@ -259,7 +269,7 @@ private:
             workQue.FreeTensor(sharedTmpBuffer);
         }
         outQueY.EnQue<DTYPE_Y>(yLocal);
-        inQueFirst.FreeTensor(x1Local);
+        inQueFirst.EnQue(x1Local);
         inQueSecond.FreeTensor(x2Local);
     }
 
@@ -299,7 +309,7 @@ private:
             workQue.FreeTensor(sharedTmpBuffer);
         }
         outQueY.EnQue<DTYPE_Y>(yLocal);
-        inQueFirst.FreeTensor(x1Local);
+        inQueFirst.EnQue(x1Local);
         inQueSecond.FreeTensor(x2Local);
     }
 
