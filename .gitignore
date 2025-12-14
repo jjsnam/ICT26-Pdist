@@ -11,3 +11,4 @@ checker/input/
 checker/output/
 **/PROF*/
 checker/profile/
+checker/OPPROF*
