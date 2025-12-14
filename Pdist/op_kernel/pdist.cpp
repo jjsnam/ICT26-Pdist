@@ -121,13 +121,13 @@ private:
         AscendC::LocalTensor<DTYPE_Y> yLocal = outQueY.AllocTensor<DTYPE_Y>();
         if constexpr (std::is_same_v<DTYPE, half>){ // float16
             AscendC::LocalTensor<float> sharedTmpBuffer = workBuf.Get<float>();
-            AscendC::LocalTensor<float> castBufferx2 = castBuf.Get<float>();
-            AscendC::Sub(x2Local, x2Local, x1Local, this->alignedM);
-            AscendC::Cast(castBufferx2, x2Local, AscendC::RoundMode::CAST_NONE, this->alignedM);
-            AscendC::Mul(castBufferx2, castBufferx2, castBufferx2, this->M);
-            AscendC::ReduceSum(castBufferx2, castBufferx2, sharedTmpBuffer, this->M);
-            AscendC::Sqrt(castBufferx2, castBufferx2, 1);
-            AscendC::Cast(yLocal, castBufferx2, AscendC::RoundMode::CAST_NONE, 1);
+            AscendC::LocalTensor<float> castTmpBuffer = castBuf.Get<float>();
+            AscendC::Sub(x2Local, x2Local, x1Local, this->M);
+            AscendC::Cast(castTmpBuffer, x2Local, AscendC::RoundMode::CAST_NONE, this->M);
+            AscendC::Mul(castTmpBuffer, castTmpBuffer, castTmpBuffer, this->M);
+            AscendC::ReduceSum(castTmpBuffer, castTmpBuffer, sharedTmpBuffer, this->M);
+            AscendC::Sqrt(castTmpBuffer, castTmpBuffer, 1);
+            AscendC::Cast(yLocal, castTmpBuffer, AscendC::RoundMode::CAST_NONE, 1);
         }
         else{ // float32
             AscendC::LocalTensor<DTYPE_Y> sharedTmpBuffer = workBuf.Get<DTYPE_Y>();
