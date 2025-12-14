@@ -6,10 +6,7 @@ template<typename DTYPE>
 class KernelPdist{
 public:
     __aicore__ inline KernelPdist() {}
-    __aicore__ inline ~KernelPdist() {
-        AscendC::LocalTensor<DTYPE_Y> outputBuffer = outQueBuffer.DeQue<DTYPE_Y>();
-        outQueBuffer.FreeTensor(outputBuffer);
-    }
+    __aicore__ inline ~KernelPdist() {}
     __aicore__ inline void Init(GM_ADDR x, GM_ADDR y, uint32_t pType, float pVal, uint32_t N, uint32_t M, uint32_t alignNum, AscendC::TPipe * pipeIn) {
         this->blockIdx = AscendC::GetBlockIdx();
         this->N = N;
@@ -25,8 +22,6 @@ public:
         }
         this->startPair = startPair;
         this->endPair = endPair;
-        // this->i = floor((2 * N - 1 - sqrt((2 * N - 1) * (2 * N - 1) - 8 * startPair)) / 2.0);
-        // this->j = startPair - i * (2 * N - i - 1) / 2 + i + 1;
         int l = 0, r = N - 1, mid, ans;
         while (l <= r){
             mid = (l + r) >> 1;
@@ -41,23 +36,22 @@ public:
         }
         this->i = ans;
         this->j = startPair - 1ull * ans * (2 * N - ans - 1) / 2 + ans + 1;
+        this->copyOutBlock = 4096; // 16KB at most
 
         this->pType = pType;
         this->pVal = pVal;
         
         xGm.SetGlobalBuffer((__gm__ DTYPE_X *)x, 1ull * N * M);
-        yGm.SetGlobalBuffer((__gm__ DTYPE_Y *)y, (1ull * N * (N - 1) / 2 + alignNum - 1) / alignNum * alignNum); // aligned output
+        yGm.SetGlobalBuffer((__gm__ DTYPE_Y *)y, (1ull * N * (N - 1) / 2 + this->alignNum - 1) / this->alignNum * this->alignNum); // aligned output
         pipe = pipeIn;
         pipe->InitBuffer(inQueFirst, 1, this->alignedM * sizeof(DTYPE_X));
         pipe->InitBuffer(inQueSecond, BUFFER_NUM, this->alignedM * sizeof(DTYPE_X));
-        pipe->InitBuffer(outQueY, 1, 1 * sizeof(DTYPE_Y));
-        pipe->InitBuffer(outQueBuffer, 1, this->M * sizeof(DTYPE_Y));
+        pipe->InitBuffer(outQueY, 1 * sizeof(DTYPE_Y));
+        pipe->InitBuffer(outQueBuffer, this->copyOutBlock * sizeof(DTYPE_Y));
         pipe->InitBuffer(workBuf, this->M * sizeof(float)); // shared work buffer for calculation
         if constexpr (std::is_same_v<DTYPE, half>){
             pipe->InitBuffer(castBuf, this->alignedM * sizeof(float)); // shared cast buffer
         }
-        AscendC::LocalTensor<DTYPE_Y> outputBuffer = outQueBuffer.AllocTensor<DTYPE_Y>();
-        outQueBuffer.EnQue(outputBuffer);
         this->bufferNum = 0;
     }
 
@@ -67,6 +61,7 @@ public:
                 int i = this->i;
                 int j = this->j;
                 uint64_t pair = startPair;
+                AscendC::LocalTensor<DTYPE_Y> outputBuffer = outQueBuffer.Get<DTYPE_Y>();
                 for (int i = this->i; pair < endPair; i ++) {
                     CopyInFirst(i);
                     AscendC::LocalTensor<DTYPE_X> x1Local = inQueFirst.DeQue<DTYPE_X>();
@@ -75,8 +70,8 @@ public:
                     j ++;
                     for (; j <= N && pair < endPair; j ++, pair ++) {
                         if (j < N) CopyInSecond(j);
-                        ComputeL2(i, j - 1, x1Local);
-                        CopyOutAligned(pair);
+                        DTYPE_Y res = ComputeL2(i, j - 1, x1Local);
+                        CopyOutAligned(pair, res, outputBuffer);
                     }
                     if (j <= N) {
                         AscendC::LocalTensor<DTYPE_X> x2Local = inQueSecond.DeQue<DTYPE_X>();
@@ -101,24 +96,18 @@ private:
         inQueSecond.EnQue(x2Local);
     }
 
-    __aicore__ inline void CopyOutAligned(uint64_t pair){
-        AscendC::LocalTensor<DTYPE_Y> outputBuffer = outQueBuffer.DeQue<DTYPE_Y>();
-        AscendC::LocalTensor<DTYPE_Y> yLocal = outQueY.DeQue<DTYPE_Y>();
-        DTYPE_Y val = yLocal.GetValue(0);
-        outputBuffer.SetValue(this->bufferNum, val);
-        this->bufferNum ++;
-        if (this->bufferNum == this->alignNum || pair == this->endPair - 1){
+    __aicore__ inline void CopyOutAligned(uint64_t pair, DTYPE_Y res, AscendC::LocalTensor<DTYPE_Y> &outputBuffer){
+        outputBuffer.SetValue(this->bufferNum ++, res);
+        if (this->bufferNum == this->copyOutBlock || pair == this->endPair - 1){
             uint64_t startIdx = pair - this->bufferNum + 1;
-            AscendC::DataCopy(yGm[startIdx], outputBuffer, this->alignNum);
+            AscendC::DataCopy(yGm[startIdx], outputBuffer, (this->bufferNum + this->alignNum - 1) / this->alignNum * this->alignNum);
             this->bufferNum = 0;
         }
-        outQueBuffer.EnQue(outputBuffer);
-        outQueY.FreeTensor(yLocal);
     }
 
-    __aicore__ inline void ComputeL2(int i, int j, AscendC::LocalTensor<DTYPE_X> &x1Local){
+    __aicore__ inline DTYPE_Y ComputeL2(int i, int j, AscendC::LocalTensor<DTYPE_X> &x1Local){
         AscendC::LocalTensor<DTYPE_X> x2Local = inQueSecond.DeQue<DTYPE_X>();
-        AscendC::LocalTensor<DTYPE_Y> yLocal = outQueY.AllocTensor<DTYPE_Y>();
+        AscendC::LocalTensor<DTYPE_Y> yLocal = outQueY.Get<DTYPE_Y>();
         if constexpr (std::is_same_v<DTYPE, half>){ // float16
             AscendC::LocalTensor<float> sharedTmpBuffer = workBuf.Get<float>();
             AscendC::LocalTensor<float> castTmpBuffer = castBuf.Get<float>();
@@ -136,8 +125,8 @@ private:
             AscendC::ReduceSum(yLocal, x2Local, sharedTmpBuffer, this->M);
             AscendC::Sqrt(yLocal, yLocal, 1);
         }
-        outQueY.EnQue<DTYPE_Y>(yLocal);
         inQueSecond.FreeTensor(x2Local);
+        return yLocal.GetValue(0);
     }
 
 private:
@@ -147,13 +136,14 @@ private:
     int pType;
     float pVal;
     uint64_t startPair, endPair;
+    uint64_t copyOutBlock;
     int alignNum, bufferNum;
     uint64_t alignedM;
     AscendC::TPipe *pipe;
     AscendC::TQue<AscendC::TPosition::VECIN, 1> inQueFirst;
     AscendC::TQue<AscendC::TPosition::VECIN, BUFFER_NUM> inQueSecond;
-    AscendC::TQue<AscendC::TPosition::VECOUT, 1> outQueY;
-    AscendC::TQue<AscendC::TPosition::VECOUT, 1> outQueBuffer;
+    AscendC::TBuf<AscendC::TPosition::VECOUT> outQueY;
+    AscendC::TBuf<AscendC::TPosition::VECOUT> outQueBuffer;
     AscendC::TBuf<AscendC::TPosition::VECCALC> workBuf;
     AscendC::TBuf<AscendC::TPosition::VECCALC> castBuf;
     AscendC::GlobalTensor<DTYPE_X> xGm;
