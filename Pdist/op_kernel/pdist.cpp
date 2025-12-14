@@ -69,19 +69,20 @@ public:
                 uint64_t pair = startPair;
                 for (int i = this->i; pair < endPair; i ++) {
                     CopyInFirst(i);
+                    AscendC::LocalTensor<DTYPE_X> x1Local = inQueFirst.DeQue<DTYPE_X>();
                     int j = i == this->i ? this->j : i + 1;
                     CopyInSecond(j);
                     j ++;
                     for (; j <= N && pair < endPair; j ++, pair ++) {
                         if (j < N) CopyInSecond(j);
-                        ComputeL2(i, j - 1);
+                        ComputeL2(i, j - 1, x1Local);
                         CopyOutAligned(pair);
                     }
                     if (j <= N) {
                         AscendC::LocalTensor<DTYPE_X> x2Local = inQueSecond.DeQue<DTYPE_X>();
                         inQueSecond.FreeTensor(x2Local);
                     }
-                    ClearInFirst();
+                    inQueFirst.FreeTensor(x1Local);
                 }
                 break;
             }
@@ -92,11 +93,6 @@ private:
         AscendC::LocalTensor<DTYPE_X> x1Local = inQueFirst.AllocTensor<DTYPE_X>();
         AscendC::DataCopy(x1Local, xGm[1ull * i * this->M], this->alignedM);
         inQueFirst.EnQue(x1Local);
-    }
-
-    __aicore__ inline void ClearInFirst(){
-        AscendC::LocalTensor<DTYPE_X> inputX = inQueFirst.DeQue<DTYPE_X>();
-        inQueFirst.FreeTensor(inputX);
     }
 
     __aicore__ inline void CopyInSecond(int j){
@@ -120,8 +116,7 @@ private:
         outQueY.FreeTensor(yLocal);
     }
 
-    __aicore__ inline void ComputeL2(int i, int j){
-        AscendC::LocalTensor<DTYPE_X> x1Local = inQueFirst.DeQue<DTYPE_X>();
+    __aicore__ inline void ComputeL2(int i, int j, AscendC::LocalTensor<DTYPE_X> &x1Local){
         AscendC::LocalTensor<DTYPE_X> x2Local = inQueSecond.DeQue<DTYPE_X>();
         AscendC::LocalTensor<DTYPE_Y> yLocal = outQueY.AllocTensor<DTYPE_Y>();
         if constexpr (std::is_same_v<DTYPE, half>){ // float16
@@ -142,7 +137,6 @@ private:
             AscendC::Sqrt(yLocal, yLocal, 1);
         }
         outQueY.EnQue<DTYPE_Y>(yLocal);
-        inQueFirst.EnQue(x1Local);
         inQueSecond.FreeTensor(x2Local);
     }
 
