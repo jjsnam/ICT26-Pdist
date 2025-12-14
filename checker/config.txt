@@ -3,10 +3,10 @@
 # ==========================================
 
 # Data Size: S(100,400), M(2024,3000), L(100000,100000)
-data_size=L
+data_size=M
 
 # P-norm value: e.g., 1.0, 2.0, inf, -2.0
-p=4.5
+p=2.0
 
 # Data Type: float16, float32 (float means float32)
 data_type=float16

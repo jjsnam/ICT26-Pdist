@@ -26,8 +26,7 @@ public:
         }
         this->startPair = startPair;
         this->endPair = endPair;
-        // this->i = floor((2 * N - 1 - sqrt((2 * N - 1) * (2 * N - 1) - 8 * startPair)) / 2.0);
-        // this->j = startPair - i * (2 * N - i - 1) / 2 + i + 1;
+
         int l = 0, r = N - 1, mid, ans;
         while (l <= r){
             mid = (l + r) >> 1;
