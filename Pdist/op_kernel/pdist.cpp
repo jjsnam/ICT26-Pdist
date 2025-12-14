@@ -7,11 +7,11 @@ class KernelPdist{
 public:
     __aicore__ inline KernelPdist() {}
     __aicore__ inline ~KernelPdist() {}
-    __aicore__ inline void Init(GM_ADDR x, GM_ADDR y, uint32_t pType, float pVal, uint32_t N, uint32_t M, uint32_t alignNum, AscendC::TPipe * pipeIn) {
+    __aicore__ inline void Init(GM_ADDR x, GM_ADDR y, PdistTilingData &tiling_data, AscendC::TPipe * pipeIn) {
         this->blockIdx = AscendC::GetBlockIdx();
-        this->N = N;
-        this->M = M;
-        this->alignNum = alignNum;
+        this->N = tiling_data.N;
+        this->M = tiling_data.M;
+        this->alignNum = tiling_data.alignNum;
         this->alignedM = (M + alignNum - 1) / alignNum * alignNum;
         uint64_t totalPairs = 1ull * N * (N - 1) / 2;
         uint64_t pairsPerBlock = (totalPairs + AscendC::GetBlockNum() - 1) / AscendC::GetBlockNum();
@@ -36,10 +36,11 @@ public:
         }
         this->i = ans;
         this->j = startPair - 1ull * ans * (2 * N - ans - 1) / 2 + ans + 1;
-        this->copyOutBlock = 4096; // 16KB at most
+        
+        this->copyOutBlock = tiling_data.copyOutBlock; // 16KB at most
 
-        this->pType = pType;
-        this->pVal = pVal;
+        this->pType = tiling_data.pType;
+        this->pVal = tiling_data.pVal;
         
         xGm.SetGlobalBuffer((__gm__ DTYPE_X *)x, 1ull * N * M);
         yGm.SetGlobalBuffer((__gm__ DTYPE_Y *)y, (1ull * N * (N - 1) / 2 + this->alignNum - 1) / this->alignNum * this->alignNum); // aligned output
@@ -156,12 +157,12 @@ extern "C" __global__ __aicore__ void pdist(GM_ADDR x, GM_ADDR y, GM_ADDR worksp
     AscendC::TPipe pipe;
     if (tiling_data.dataType == DT_FLOAT16){
         KernelPdist<half> op;
-        op.Init(x, y, tiling_data.pType, tiling_data.pVal, tiling_data.N, tiling_data.M, tiling_data.alignNum, &pipe);
+        op.Init(x, y, tiling_data, &pipe);
         op.Process();
     }
     else{
         KernelPdist<float> op;
-        op.Init(x, y, tiling_data.pType, tiling_data.pVal, tiling_data.N, tiling_data.M, tiling_data.alignNum, &pipe);
+        op.Init(x, y, tiling_data, &pipe);
         op.Process();
     }
 }

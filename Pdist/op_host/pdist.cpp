@@ -7,6 +7,7 @@
 
 const double ZERO = 1e-12;
 constexpr int alignSizeB = 32; // aligning with 32 bytes
+constexpr int copyOutTileB = 16384; // 16KB
 
 namespace optiling {
 static ge::graphStatus TilingFunc(gert::TilingContext* context)
@@ -19,6 +20,9 @@ static ge::graphStatus TilingFunc(gert::TilingContext* context)
     int alignNum = alignSizeB / typeSize;
     tiling.set_alignNum(alignNum);
     tiling.set_dataType(dataType);
+
+    // Some configs
+    tiling.set_copyOutBlock(copyOutTileB / typeSize); // 16KB
 
     // Dealing with attr p
     const gert::RuntimeAttrs * attrs = context->GetAttrs();
