@@ -10,6 +10,7 @@ BEGIN_TILING_DATA_DEF(PdistTilingData)
     TILING_DATA_FIELD_DEF(uint32_t, M); // The second dimension of input tensor
     TILING_DATA_FIELD_DEF(int, alignNum); // The align number given the data type
     TILING_DATA_FIELD_DEF(int, dataType); // The data type
+    TILING_DATA_FIELD_DEF(int, j_block); 
 END_TILING_DATA_DEF;
 
 REGISTER_TILING_DATA_CLASS(Pdist, PdistTilingData)
