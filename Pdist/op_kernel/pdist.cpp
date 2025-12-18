@@ -406,73 +406,7 @@ __aicore__ inline void CopyInSecond(int j_start, int j_count) {
         inQueFirst.EnQue(x1Local);
         inQueSecond.EnQue(x2Local);
     }
-    __aicore__ inline void ComputeLgeneralWithDoubleBuffer(int /*i*/, int /*j*/, float pVal)
-    {
-        // 每个 DeQue 对应一个 pair
-        AscendC::LocalTensor<DTYPE_X> x1Local = inQueFirst.DeQue<DTYPE_X>();
-        AscendC::LocalTensor<DTYPE_X> x2Local = inQueSecond.DeQue<DTYPE_X>();
-        AscendC::LocalTensor<DTYPE_Y> yLocal  = outQueY.DeQue<DTYPE_Y>();
-
-        if constexpr (std::is_same_v<DTYPE, half>) {
-            // ===== float16 路径 =====
-            AscendC::LocalTensor<float> tmpBuffer  = workQue.DeQue<float>();
-            AscendC::LocalTensor<float> x1FloatBuf = castQue1.DeQue<float>();
-            AscendC::LocalTensor<float> x2FloatBuf = castQue2.DeQue<float>();
-
-            // 1. 显式 Cast（关键修复点）
-            AscendC::Cast(x1FloatBuf, x1Local,
-                        AscendC::RoundMode::CAST_NONE, this->M);
-            AscendC::Cast(x2FloatBuf, x2Local,
-                        AscendC::RoundMode::CAST_NONE, this->M);
-
-            // 2. |x1 - x2|
-            AscendC::Sub(x2FloatBuf, x2FloatBuf, x1FloatBuf, this->M);
-            AscendC::Abs(x2FloatBuf, x2FloatBuf, this->M);
-
-            float p  = static_cast<float>(pVal);
-            float Rp = 1.0f / p;
-
-            // 3. |x1 - x2|^p
-            AscendC::Power(x2FloatBuf, x2FloatBuf, p, this->M);
-
-            // 4. reduce sum
-            AscendC::ReduceSum(x2FloatBuf, x2FloatBuf, tmpBuffer, this->M);
-
-            // 5. (sum)^(1/p)
-            AscendC::Power(x2FloatBuf, x2FloatBuf, Rp, 1);
-
-            // 6. Cast 回输出
-            AscendC::Cast(yLocal, x2FloatBuf,
-                        AscendC::RoundMode::CAST_NONE, 1);
-
-            // 7. 归还 buffer
-            castQue1.EnQue(x1FloatBuf);
-            castQue2.EnQue(x2FloatBuf);
-            workQue.EnQue(tmpBuffer);
-        }
-        else {
-            // ===== float32 路径 =====
-            AscendC::LocalTensor<DTYPE_Y> tmpBuffer =
-                workQue.DeQue<DTYPE_Y>();
-
-            AscendC::Sub(x2Local, x2Local, x1Local, this->M);
-            AscendC::Abs(x2Local, x2Local, this->M);
-
-            DTYPE_X p  = static_cast<DTYPE_X>(pVal);
-            DTYPE_Y Rp = static_cast<DTYPE_Y>(1.0f / pVal);
-
-            AscendC::Power(x2Local, x2Local, p, this->M);
-            AscendC::ReduceSum(yLocal, x2Local, tmpBuffer, this->M);
-            AscendC::Power(yLocal, yLocal, Rp, 1);
-
-            workQue.EnQue(tmpBuffer);
-        }
-
-        // 输出与 buffer 回收
-        outQueY.EnQue<DTYPE_Y>(yLocal);
-        inQueFirst.EnQue(x1Local);
-        inQueSecond.EnQue(x2Local);
-    }
+    
 
 private:
     int blockIdx;
