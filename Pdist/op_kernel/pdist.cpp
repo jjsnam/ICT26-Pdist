@@ -55,7 +55,7 @@ public:
         pipe.InitBuffer(workQue, BUFFER_NUM, this->alignNum * sizeof(float)); // shared work buffer for calculation
         if constexpr (std::is_same_v<DTYPE, half>){
             pipe.InitBuffer(castQue1, BUFFER_NUM, this->alignedM * sizeof(float)); // shared cast buffer
-            pipe.InitBuffer(castQue2, BUFFER_NUM, this->alignedM * sizeof(float)); // shared cast buffer
+            pipe.InitBuffer(castQue2, BUFFER_NUM, this->j_block * this->alignedM * sizeof(float)); // shared cast buffer
         }
         this->bufferNum = 0;
         AllocTensors();
@@ -313,7 +313,8 @@ __aicore__ inline void CopyInSecond(int j_start, int j_count) {
             AscendC::LocalTensor<float> castBufferx2 = castQue2.DeQue<float>();
             uint64_t x1_offset = (1ull * i * this->M) % (this->alignNum);
             uint64_t x2_offset = (1ull * j * this->M) % (this->alignNum);
-            AscendC::Cast(castBufferx2, x2Local, AscendC::RoundMode::CAST_NONE, this->alignedM);
+            AscendC::Cast(castBufferx1, x1Local, AscendC::RoundMode::CAST_NONE, this->alignedM);
+            AscendC::Cast(castBufferx2, x2Row, AscendC::RoundMode::CAST_NONE, this->alignedM);
             AscendC::Sub(castBufferx2[x2_offset], castBufferx2[x2_offset], castBufferx1[x1_offset], this->M);
             AscendC::Mul(castBufferx2[x2_offset], castBufferx2[x2_offset], castBufferx2[x2_offset], this->M);
             AscendC::ReduceSum(castBufferx2[x2_offset], castBufferx2[x2_offset], sharedTmpBuffer, this->M);
@@ -334,78 +335,6 @@ __aicore__ inline void CopyInSecond(int j_start, int j_count) {
         outQueY.EnQue<DTYPE_Y>(yLocal);
         inQueFirst.EnQue(x1Local);
         inQueSecond.EnQue(x2Row);
-    }
-
-    __aicore__ inline void ComputeL2Batch(int i, int j_start, int jb, int startPair) { 
-// 假设我们将计算结果存储在 outQue 中
-    for (int k = 0; k < jb; ++k) {
-        // 拿 x1, x2, yLocal
-        AscendC::LocalTensor<DTYPE_X> x1Local = inQueFirst.DeQue<DTYPE_X>();
-        AscendC::LocalTensor<DTYPE_X> x2Local = inQueSecond.DeQue<DTYPE_X>();
-        AscendC::LocalTensor<DTYPE_Y> yLocal = outQueY.DeQue<DTYPE_Y>();
-
-        // ComputeL2 逻辑
-        if constexpr (std::is_same_v<DTYPE, half>) {
-            // Perform calculations
-            AscendC::LocalTensor<float> tmpBuffer = workQue.DeQue<float>();
-            AscendC::LocalTensor<float> castBuf1 = castQue1.DeQue<float>();
-            AscendC::LocalTensor<float> castBuf2 = castQue2.DeQue<float>();
-
-            AscendC::Cast(castBuf2, x2Local, AscendC::RoundMode::CAST_NONE, M);
-            AscendC::Cast(castBuf1, x1Local, AscendC::RoundMode::CAST_NONE, M); // x1Local -> castBuf1 (float)
-            AscendC::Sub(castBuf2, castBuf2, castBuf1, M);
-            AscendC::Mul(castBuf2, castBuf2, castBuf2, M);
-            AscendC::ReduceSum(castBuf2, castBuf2, tmpBuffer, M);
-            AscendC::Sqrt(castBuf2, castBuf2, 1);
-            AscendC::Cast(yLocal, castBuf2, AscendC::RoundMode::CAST_NONE, 1);
-
-            // 将计算结果存储到 outQue 中
-            outQueY.EnQue(yLocal);
-
-            // 回收资源
-            castQue1.EnQue(castBuf1);
-            castQue2.EnQue(castBuf2);
-            workQue.EnQue(tmpBuffer);
-        } else {
-            // Perform calculations for non-half type
-            AscendC::Sub(x2Local, x2Local, x1Local, M);
-            AscendC::LocalTensor<DTYPE_Y> tmpBuffer = workQue.DeQue<DTYPE_Y>();
-            AscendC::Mul(x2Local, x2Local, x2Local, M);
-            AscendC::ReduceSum(yLocal, x2Local, tmpBuffer, M);
-            AscendC::Sqrt(yLocal, yLocal, 1);
-
-            // 将计算结果存储到 outQue 中
-            outQueY.EnQue(yLocal);
-
-            // 回收资源
-            workQue.EnQue(tmpBuffer);
-        }
-
-        // 继续进行队列回收，保持循环流畅
-        inQueFirst.EnQue(x1Local);
-        inQueSecond.EnQue(x2Local);
-    }
-
-    // 在循环外，统一写回 GM
-    for (int k = 0; k < jb; ++k) {
-        // 从 outQue 取出数据
-        AscendC::LocalTensor<DTYPE_Y> yLocal = outQueY.DeQue<DTYPE_Y>();
-
-        // 计算写回位置
-        int pairIdx = startPair + k;
-        int l = 0, r = N-1, mid;
-        while (l <= r) {
-            mid = (l + r) >> 1;
-            uint64_t count = 1ull * mid * (2*N - mid - 1) / 2;
-            if (count <= pairIdx) l = mid + 1;
-            else r = mid - 1;
-        }
-        int iIdx = r;
-        int jIdx = pairIdx - iIdx*(2*N-iIdx-1)/2 + iIdx + 1;
-
-        // 批量写回 GM
-        AscendC::DataCopy(yGm[1ull * iIdx*(2*N-iIdx-1)/2 + jIdx - iIdx - 1], yLocal, 1);
-    }
     }
 
     __aicore__ inline void ComputeLinf(int i, int j){
