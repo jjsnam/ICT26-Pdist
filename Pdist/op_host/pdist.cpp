@@ -6,7 +6,7 @@
 #include <cassert>
 
 const double ZERO = 1e-12;
-constexpr int alignSizeB = 32; // aligning with 32 bytes
+constexpr int alignSizeB = 32; // aligning with 32
 
 namespace optiling {
 static ge::graphStatus TilingFunc(gert::TilingContext* context)
@@ -48,6 +48,9 @@ static ge::graphStatus TilingFunc(gert::TilingContext* context)
     auto ascendcPlatform = platform_ascendc::PlatformAscendC(context->GetPlatformInfo());
     ascendcPlatform.GetCoreMemSize(platform_ascendc::CoreMemType::UB, ubSize);
     auto coreNum = ascendcPlatform.GetCoreNum(); // 40 for Ascend 910B4
+
+    // 设置计算出的J_BLOCK
+    tiling.set_j_block(4);
 
     // Dealing with input shape
     const gert::StorageShape* x_shape = context->GetInputShape(0);
