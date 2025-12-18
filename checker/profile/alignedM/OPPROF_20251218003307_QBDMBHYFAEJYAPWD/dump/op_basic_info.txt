@@ -1,0 +1,9 @@
+Op Name=Pdist_16996420756afb19140baf25c1330ba0_0
+Block Dim=40
+Run Soc Version=Ascend910B4
+Device Id=0
+Pid=1140749
+Current Freq=1650
+Rated Freq=1650
+Is MC2=0
+Is Lccl=0
