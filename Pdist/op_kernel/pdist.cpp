@@ -226,13 +226,6 @@ private:
         AscendC::LocalTensor<DTYPE_X> x1Local = inQueFirst.DeQue<DTYPE_X>();
         AscendC::DataCopy(x1Local, xGm[1ull * i * this->alignedM], this->alignedM);
         inQueFirst.EnQue(x1Local);
-        if constexpr (std::is_same_v<DTYPE, half>) {
-            AscendC::LocalTensor<DTYPE_X> x1LocalHalf = inQueFirst.DeQue<DTYPE_X>();
-            AscendC::LocalTensor<float> castBufferx1 = castQue1.DeQue<float>();
-            AscendC::Cast(castBufferx1, x1LocalHalf, AscendC::RoundMode::CAST_NONE, this->alignedM);
-            castQue1.EnQue(castBufferx1);
-            inQueFirst.EnQue(x1LocalHalf);
-        }
     }
 
 __aicore__ inline void CopyInSecond(int j_start, int j_count) {
@@ -241,16 +234,6 @@ __aicore__ inline void CopyInSecond(int j_start, int j_count) {
     AscendC::LocalTensor<DTYPE_X> ubBuffer = inQueSecond.DeQue<DTYPE_X>();
     AscendC::DataCopy(ubBuffer, xGm[j_start * alignedM], totalSize);
     inQueSecond.EnQue(ubBuffer);
-    if constexpr (std::is_same_v<DTYPE, half>) {
-        AscendC::LocalTensor<DTYPE_X> tmpHalf = inQueSecond.DeQue<DTYPE_X>();
-        AscendC::LocalTensor<float> castBuffer = castQue2.DeQue<float>();
-
-        AscendC::Cast(castBuffer, tmpHalf, AscendC::RoundMode::CAST_NONE, totalSize);
-
-        // 回收队列
-        inQueSecond.EnQue(tmpHalf);
-        castQue2.EnQue(castBuffer);
-    }
 }
     /* __aicore__ inline void CopyOut(int i, int j){
         AscendC::LocalTensor<DTYPE_Y> yLocal = outQueY.DeQue<DTYPE_Y>();
@@ -336,7 +319,7 @@ __aicore__ inline void CopyInSecond(int j_start, int j_count) {
             workQue.EnQue(sharedTmpBuffer);
         }
         outQueY.EnQue<DTYPE_Y>(yLocal);
-        inQueSecond.EnQue(x2Row);
+        inQueSecond.EnQue(x2Local);
     }
 
     __aicore__ inline void ComputeLinf(int i, int j){
