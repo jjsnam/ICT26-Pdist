@@ -12,7 +12,7 @@ public:
         this->N = tiling_data.N;
         this->M = tiling_data.M;
         this->alignNum = tiling_data.alignNum;
-        this->alignedM = (M + alignNum - 1) / alignNum * alignNum;
+        this->alignedM = tiling_data.alignedM;
         uint64_t totalPairs = 1ull * N * (N - 1) / 2;
         uint64_t pairsPerBlock = (totalPairs + AscendC::GetBlockNum() - 1) / AscendC::GetBlockNum();
         uint64_t startPair = (blockIdx * pairsPerBlock + alignNum - 1) / alignNum * alignNum;
@@ -41,12 +41,22 @@ public:
 
         this->pType = tiling_data.pType;
         this->pVal = tiling_data.pVal;
+
+        this->batchSize = tiling_data.batchSize;
+
+        this->copyParams.blockLen = this->M * sizeof(DTYPE_X);
+        this->copyParams.srcStride = 0;
+        this->copyParams.dstStride = 0;
+        this->padParams.isPad = true;
+        this->padParams.leftPadding = 0;
+        this->padParams.rightPadding = (this->alignedM - this->M);
+        this->padParams.paddingValue = 0;
         
         xGm.SetGlobalBuffer((__gm__ DTYPE_X *)x, 1ull * N * M);
         yGm.SetGlobalBuffer((__gm__ DTYPE_Y *)y, (1ull * N * (N - 1) / 2 + this->alignNum - 1) / this->alignNum * this->alignNum); // aligned output
         pipe = pipeIn;
         pipe->InitBuffer(inQueFirst, 1, this->alignedM * sizeof(DTYPE_X));
-        pipe->InitBuffer(inQueSecond, BUFFER_NUM, this->alignedM * sizeof(DTYPE_X));
+        pipe->InitBuffer(inQueSecond, BUFFER_NUM, 1ull * this->batchSize * this->alignedM * sizeof(DTYPE_X));
         pipe->InitBuffer(outQueY, 1 * sizeof(DTYPE_Y));
         pipe->InitBuffer(outQueBuffer, this->copyOutBlock * sizeof(DTYPE_Y));
         pipe->InitBuffer(workBuf, this->M * sizeof(float)); // shared work buffer for calculation
@@ -62,17 +72,28 @@ public:
                 int i = this->i;
                 int j = this->j;
                 uint64_t pair = startPair;
+                int batch, next_batch;
                 AscendC::LocalTensor<DTYPE_Y> outputBuffer = outQueBuffer.Get<DTYPE_Y>();
                 for (int i = this->i; pair < endPair; i ++) {
                     CopyInFirst(i);
                     AscendC::LocalTensor<DTYPE_X> x1Local = inQueFirst.DeQue<DTYPE_X>();
                     int j = i == this->i ? this->j : i + 1;
-                    CopyInSecond(j);
-                    j ++;
-                    for (; j <= N && pair < endPair; j ++, pair ++) {
-                        if (j < N) CopyInSecond(j);
-                        DTYPE_Y res = ComputeL2(i, j - 1, x1Local);
-                        CopyOutAligned(pair, res, outputBuffer);
+                    batch = min(min(N - j, (int)(endPair - pair)), this->batchSize);
+                    CopyInSecondBatched(j, batch);
+                    j += batch;
+                    for (; j <= N && pair < endPair;) {
+                        if (j < N) {
+                            next_batch = min(min(N - j, (int)(endPair - pair)), this->batchSize);
+                            CopyInSecondBatched(j, next_batch);
+                        }
+                        AscendC::LocalTensor<DTYPE_X> x2Local = inQueSecond.DeQue<DTYPE_X>();
+                        for (int jj = 0; jj < batch; jj ++, pair ++) {
+                            DTYPE_Y res = ComputeL2Batched(i, j - batch + jj, x1Local, x2Local, jj * this->alignedM);
+                            CopyOutAligned(pair, res, outputBuffer);
+                        }
+                        inQueSecond.FreeTensor(x2Local);
+                        batch = next_batch;
+                        j += batch;
                     }
                     if (j <= N) {
                         AscendC::LocalTensor<DTYPE_X> x2Local = inQueSecond.DeQue<DTYPE_X>();
@@ -91,9 +112,10 @@ private:
         inQueFirst.EnQue(x1Local);
     }
 
-    __aicore__ inline void CopyInSecond(int j){
+    __aicore__ inline void CopyInSecondBatched(int j_start, int batch){
+        this->copyParams.blockCount = batch;
         AscendC::LocalTensor<DTYPE_X> x2Local = inQueSecond.AllocTensor<DTYPE_X>();
-        AscendC::DataCopy(x2Local, xGm[1ull * j * this->M], this->alignedM);
+        AscendC::DataCopyPad(x2Local, xGm[1ull * j_start * this->M], this->copyParams, this->padParams);
         inQueSecond.EnQue(x2Local);
     }
 
@@ -106,14 +128,13 @@ private:
         }
     }
 
-    __aicore__ inline DTYPE_Y ComputeL2(int i, int j, AscendC::LocalTensor<DTYPE_X> &x1Local){
-        AscendC::LocalTensor<DTYPE_X> x2Local = inQueSecond.DeQue<DTYPE_X>();
+    __aicore__ inline DTYPE_Y ComputeL2Batched(int i, int j, AscendC::LocalTensor<DTYPE_X> &x1Local, AscendC::LocalTensor<DTYPE_X> &x2Local, int offset){
         AscendC::LocalTensor<DTYPE_Y> yLocal = outQueY.Get<DTYPE_Y>();
         if constexpr (std::is_same_v<DTYPE, half>){ // float16
             AscendC::LocalTensor<float> sharedTmpBuffer = workBuf.Get<float>();
             AscendC::LocalTensor<float> castTmpBuffer = castBuf.Get<float>();
-            AscendC::Sub(x2Local, x2Local, x1Local, this->M);
-            AscendC::Cast(castTmpBuffer, x2Local, AscendC::RoundMode::CAST_NONE, this->M);
+            AscendC::Sub(x2Local[offset], x2Local[offset], x1Local, this->M);
+            AscendC::Cast(castTmpBuffer, x2Local[offset], AscendC::RoundMode::CAST_NONE, this->M);
             AscendC::Mul(castTmpBuffer, castTmpBuffer, castTmpBuffer, this->M);
             AscendC::ReduceSum(castTmpBuffer, castTmpBuffer, sharedTmpBuffer, this->M);
             AscendC::Sqrt(castTmpBuffer, castTmpBuffer, 1);
@@ -121,12 +142,11 @@ private:
         }
         else{ // float32
             AscendC::LocalTensor<DTYPE_Y> sharedTmpBuffer = workBuf.Get<DTYPE_Y>();
-            AscendC::Sub(x2Local, x1Local, x2Local, this->M);
-            AscendC::Mul(x2Local, x2Local, x2Local, this->M);
-            AscendC::ReduceSum(yLocal, x2Local, sharedTmpBuffer, this->M);
+            AscendC::Sub(x2Local[offset], x2Local[offset], x1Local, this->M);
+            AscendC::Mul(x2Local[offset], x2Local[offset], x2Local[offset], this->M);
+            AscendC::ReduceSum(yLocal, x2Local[offset], sharedTmpBuffer, this->M);
             AscendC::Sqrt(yLocal, yLocal, 1);
         }
-        inQueSecond.FreeTensor(x2Local);
         return yLocal.GetValue(0);
     }
 
@@ -140,6 +160,11 @@ private:
     uint64_t copyOutBlock;
     int alignNum, bufferNum;
     uint64_t alignedM;
+    int batchSize;
+
+    AscendC::DataCopyParams copyParams;
+    AscendC::DataCopyPadParams padParams;
+
     AscendC::TPipe *pipe;
     AscendC::TQue<AscendC::TPosition::VECIN, 1> inQueFirst;
     AscendC::TQue<AscendC::TPosition::VECIN, BUFFER_NUM> inQueSecond;

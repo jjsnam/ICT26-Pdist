@@ -1,4 +1,3 @@
-
 #include "register/tilingdata_base.h"
 
 namespace optiling {
@@ -10,6 +9,8 @@ BEGIN_TILING_DATA_DEF(PdistTilingData)
     TILING_DATA_FIELD_DEF(int, alignNum); // The align number given the data type
     TILING_DATA_FIELD_DEF(int, dataType); // The data type
     TILING_DATA_FIELD_DEF(int, copyOutBlock); // copyOutBlock Size in number
+    TILING_DATA_FIELD_DEF(int, alignedM);
+    TILING_DATA_FIELD_DEF(int, batchSize); // The batch size of copyInSecond
 END_TILING_DATA_DEF;
 
 REGISTER_TILING_DATA_CLASS(Pdist, PdistTilingData)

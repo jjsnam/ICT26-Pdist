@@ -8,6 +8,7 @@
 const double ZERO = 1e-12;
 constexpr int alignSizeB = 32; // aligning with 32 bytes
 constexpr int copyOutTileB = 16384; // 16KB
+constexpr int32_t BUFFER_NUM = 2; // is Double Buffer ?
 
 namespace optiling {
 static ge::graphStatus TilingFunc(gert::TilingContext* context)
@@ -16,13 +17,13 @@ static ge::graphStatus TilingFunc(gert::TilingContext* context)
 
     // Attaining and setting alignNum
     auto dataType = context->GetInputDesc(0)->GetDataType();
-    int typeSize = dataType == ge::DT_FLOAT16 ? 2 : 4;
-    int alignNum = alignSizeB / typeSize;
+    int typeSizeB = dataType == ge::DT_FLOAT16 ? 2 : 4;
+    int alignNum = alignSizeB / typeSizeB;
     tiling.set_alignNum(alignNum);
     tiling.set_dataType(dataType);
 
     // Some configs
-    tiling.set_copyOutBlock(copyOutTileB / typeSize); // 16KB
+    tiling.set_copyOutBlock(copyOutTileB / typeSizeB); // 16KB
 
     // Dealing with attr p
     const gert::RuntimeAttrs * attrs = context->GetAttrs();
@@ -47,18 +48,29 @@ static ge::graphStatus TilingFunc(gert::TilingContext* context)
         tiling.set_pType(0);
     }
 
+    // Dealing with input shape
+    const gert::StorageShape* x_shape = context->GetInputShape(0);
+    const uint64_t N = x_shape->GetStorageShape().GetDim(0);
+    const uint64_t M = x_shape->GetStorageShape().GetDim(1);
+    tiling.set_N(N);
+    tiling.set_M(M);
+    const uint64_t alignedM = (M + alignNum - 1) / alignNum * alignNum;
+    tiling.set_alignedM(alignedM);
+
     // Attaining platfom info
     uint64_t ubSize;
     auto ascendcPlatform = platform_ascendc::PlatformAscendC(context->GetPlatformInfo());
     ascendcPlatform.GetCoreMemSize(platform_ascendc::CoreMemType::UB, ubSize);
     auto coreNum = ascendcPlatform.GetCoreNum(); // 40 for Ascend 910B4
 
-    // Dealing with input shape
-    const gert::StorageShape* x_shape = context->GetInputShape(0);
-    const int N = x_shape->GetStorageShape().GetDim(0);
-    const int M = x_shape->GetStorageShape().GetDim(1);
-    tiling.set_N(N);
-    tiling.set_M(M);
+    uint64_t ubSizeRemain = ubSize - // Total ubSize
+                            copyOutTileB - // copyOutTile's size in Byte
+                            typeSizeB - // outQue size in Byte
+                            M * 4 - // work Buffer size in Byte
+                            (typeSizeB == 2 ? alignedM * 4 : 0) - // castBuffer size in Byte
+                            alignedM * typeSizeB; // inQue1's size in Byte
+    int batchSize = ubSizeRemain / (alignedM * BUFFER_NUM * typeSizeB);
+    tiling.set_batchSize(batchSize);
 
     context->SetBlockDim(coreNum); // Set block num to core num
 
