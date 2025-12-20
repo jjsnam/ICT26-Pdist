@@ -49,7 +49,9 @@ static ge::graphStatus TilingFunc(gert::TilingContext* context)
     ascendcPlatform.GetCoreMemSize(platform_ascendc::CoreMemType::UB, ubSize);
     auto coreNum = ascendcPlatform.GetCoreNum(); // 40 for Ascend 910B4
 
-    // 设置计算出的J_BLOCK
+    // Seting optimal J_BLOCK
+
+
     tiling.set_j_block(4);
 
     // Dealing with input shape

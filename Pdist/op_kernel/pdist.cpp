@@ -1,7 +1,7 @@
 #include "kernel_operator.h"
 #include <cmath>
 
-constexpr int32_t BUFFER_NUM = 2;
+constexpr int32_t BUFFER_NUM = 1;
 
 template<typename DTYPE>
 class KernelPdist{
@@ -121,12 +121,14 @@ public:
                 CopyInFirst(i);
                 int j_start = j;
                 CopyInSecond(j_start, batchSize);
-                
+                AscendC::LocalTensor<DTYPE_X> x1Local = inQueFirst.DeQue<DTYPE_X>();
                 for (uint64_t pair = startPair; pair < endPair; pair++) {
                     if (j >= N) {
+                        inQueFirst.EnQue(x1Local);
                         i++;
                         j = i + 1;
                         CopyInFirst(i);
+                        x1Local = inQueFirst.DeQue<DTYPE_X>();
                         j_start = j;
                         CopyInSecond(j_start, batchSize);
                     }
@@ -138,12 +140,13 @@ public:
                             CopyInSecond(j_start, remaining);
                         }
                     }
-
-                    ComputeL2(i, j, j_start);
+                    
+                    ComputeL2(i, j, j_start, x1Local);
                     CopyOutAligned(pair);
                     
                     j++;
                 }
+                inQueFirst.EnQue(x1Local);
                 break;
             }
 /*
@@ -301,8 +304,8 @@ __aicore__ inline void CopyInSecond(int j_start, int j_count) {
         inQueSecond.EnQue(x2Local);
     }
 
-    __aicore__ inline void ComputeL2(int i, int j, int j_start){
-        AscendC::LocalTensor<DTYPE_X> x1Local = inQueFirst.DeQue<DTYPE_X>();
+    __aicore__ inline void ComputeL2(int i, int j, int j_start, AscendC::LocalTensor<DTYPE_X> &x1Local){
+        
         AscendC::LocalTensor<DTYPE_X> x2Local = inQueSecond.DeQue<DTYPE_X>();
         AscendC::LocalTensor<DTYPE_Y> yLocal = outQueY.DeQue<DTYPE_Y>();
         int offset = (j - j_start) * this->alignedM;
@@ -333,7 +336,6 @@ __aicore__ inline void CopyInSecond(int j_start, int j_count) {
             workQue.EnQue(sharedTmpBuffer);
         }
         outQueY.EnQue<DTYPE_Y>(yLocal);
-        inQueFirst.EnQue(x1Local);
         inQueSecond.EnQue(x2Row);
     }
 
