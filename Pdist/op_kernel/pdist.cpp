@@ -173,24 +173,37 @@ private:
 
 private:
     template <typename T>
-    __aicore__ inline void reduceMaxBatched(const AscendC::LocalTensor<T>& dataTensor, const int &batch) {   
+    __aicore__ inline void reduceSum(const AscendC::LocalTensor<T>& dst, const AscendC::LocalTensor<T>& src, const int &totalElements) {   
         constexpr int elemsPerBlock = 32 / sizeof(T);
-        int currentLen = this->M;
+        int currentLen = totalElements;
         AscendC::SetMaskCount();
         while (currentLen > (elemsPerBlock * 8)) {
             int blockCount = (currentLen + elemsPerBlock - 1) / elemsPerBlock;
             int repeat = (blockCount + 7) / 8;
             AscendC::SetVectorMask<half, AscendC::MaskMode::COUNTER>(currentLen);
-            for (int i = 0; i < batch; i ++) {
-                AscendC::BlockReduceMax<T, false>(dataTensor[i * this->alignedM], dataTensor[i * this->alignedM], repeat, AscendC::MASK_PLACEHOLDER, 1, 1, 8);
-            }
-
+            AscendC::BlockReduceSum<T, false>(src, src, repeat, AscendC::MASK_PLACEHOLDER, 1, 1, 8);
             currentLen = blockCount;
         }
         AscendC::SetVectorMask<half, AscendC::MaskMode::COUNTER>(currentLen);
-        for (int i = 0; i < batch; i ++) {
-            AscendC::WholeReduceMax<T, false>(dataTensor[i * this->alignedM], dataTensor[i * this->alignedM], AscendC::MASK_PLACEHOLDER, 1, 1, 1, 8);
+        AscendC::WholeReduceSum<T, false>(dst, src, AscendC::MASK_PLACEHOLDER, 1, 1, 1, 8);
+        AscendC::SetMaskNorm();
+        AscendC::ResetMask();  
+    }
+
+    template <typename T>
+    __aicore__ inline void reduceMax(const AscendC::LocalTensor<T>& dst, const AscendC::LocalTensor<T>& src, const int &totalElements) {   
+        constexpr int elemsPerBlock = 32 / sizeof(T);
+        int currentLen = totalElements;
+        AscendC::SetMaskCount();
+        while (currentLen > (elemsPerBlock * 8)) {
+            int blockCount = (currentLen + elemsPerBlock - 1) / elemsPerBlock;
+            int repeat = (blockCount + 7) / 8;
+            AscendC::SetVectorMask<half, AscendC::MaskMode::COUNTER>(currentLen);
+            AscendC::BlockReduceMax<T, false>(src, src, repeat, AscendC::MASK_PLACEHOLDER, 1, 1, 8);
+            currentLen = blockCount;
         }
+        AscendC::SetVectorMask<half, AscendC::MaskMode::COUNTER>(currentLen);
+        AscendC::WholeReduceMax<T, false>(dst, src, AscendC::MASK_PLACEHOLDER, 1, 1, 1, 8, AscendC::ReduceOrder::ORDER_ONLY_VALUE);
         AscendC::SetMaskNorm();
         AscendC::ResetMask();  
     }
@@ -212,7 +225,7 @@ private:
             AscendC::Cast(castTmpBuffer, x2Local, AscendC::RoundMode::CAST_NONE, batch * this->alignedM);
             AscendC::Mul(castTmpBuffer, castTmpBuffer, castTmpBuffer, batch * this->alignedM);
             for (int i = 0; i < batch; i ++) {
-                AscendC::ReduceSum(outputBuffer[this->bufferNum ++], castTmpBuffer[i * this->alignedM], sharedTmpBuffer, this->M);
+                reduceSum(outputBuffer[this->bufferNum ++], castTmpBuffer[i * this->alignedM], this->M);
                 pair ++;
                 if (this->bufferNum == this->copyOutBlock || pair == endPair) {
                     AscendC::Sqrt(outputBuffer, outputBuffer, this->bufferNum);
@@ -230,7 +243,7 @@ private:
             }
             AscendC::Mul(x2Local, x2Local, x2Local, batch * this->alignedM);
             for (int i = 0; i < batch; i ++) {
-                AscendC::ReduceSum(yLocal[this->bufferNum ++], x2Local[i * this->alignedM], sharedTmpBuffer, this->M);
+                reduceSum(yLocal[this->bufferNum ++], x2Local[i * this->alignedM], this->M);
                 pair ++;
                 if (this->bufferNum == this->copyOutBlock || pair == endPair) {
                     AscendC::Sqrt(yLocal, yLocal, this->bufferNum);
@@ -254,9 +267,8 @@ private:
             AscendC::Sub(x2Local[i * this->alignedM], x2Local[i * this->alignedM], x1Local, this->M);
         }
         AscendC::Abs(x2Local, x2Local, batch * this->alignedM);
-        reduceMaxBatched(x2Local, batch);
         for (int i = 0; i < batch; i ++) {
-            yLocal.SetValue(this->bufferNum ++, x2Local.GetValue(i * this->alignedM));
+            reduceMax(yLocal[this->bufferNum ++], x2Local[i * this->alignedM], this->M);
             pair ++;
             if (this->bufferNum == this->copyOutBlock || pair == endPair) {
                 outQueY.EnQue(yLocal);

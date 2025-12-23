@@ -68,7 +68,6 @@ static ge::graphStatus TilingFunc(gert::TilingContext* context)
                             M * 4 - // work Buffer size in Byte
                             alignedM * typeSizeB; // inQue1's size in Byte
     int batchSize = ubSizeRemain / (alignedM * BUFFER_NUM * (typeSizeB == 2 ? 6 : 4) + 2);
-    batchSize = (batchSize >> 1) << 1;
     if (tiling.get_pType() == 0) batchSize = 1;
     tiling.set_batchSize(batchSize);
 
