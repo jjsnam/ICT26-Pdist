@@ -67,8 +67,7 @@ static ge::graphStatus TilingFunc(gert::TilingContext* context)
                             copyOutTileB * BUFFER_NUM - // copyOutTile's size in Byte
                             M * 4 - // work Buffer size in Byte
                             alignedM * typeSizeB; // inQue1's size in Byte
-    int batchSize = ubSizeRemain / (alignedM * BUFFER_NUM * (typeSizeB == 2 ? 6 : 4) + 2);
-    if (tiling.get_pType() == 0) batchSize = 1;
+    int batchSize = ubSizeRemain / (alignedM * BUFFER_NUM * ((typeSizeB == 2 ? 6 : 4) + (tiling.get_pType() == 0 ? 4 : 0)) + 2);
     tiling.set_batchSize(batchSize);
 
     context->SetBlockDim(coreNum); // Set block num to core num

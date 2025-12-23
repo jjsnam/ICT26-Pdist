@@ -1,13 +1,6 @@
 #include "kernel_operator.h"
 
-constexpr int32_t BUFFER_NUM = 2;
-
-static constexpr uint32_t DEFAULT_BLK_STRIDE = 1;
-static constexpr uint32_t DEFAULT_REP_STRIDE = 8;
-static constexpr uint32_t REP_LEN = 256;
-static constexpr uint32_t BLK_LEN = 32;
-static constexpr uint32_t ONE_REPEAT_FLOAT_SIZE = REP_LEN / 4;
-static constexpr uint32_t BINARY_BOUNDARY = DEFAULT_REP_STRIDE * 2;
+static constexpr int BUFFER_NUM = 2;
 
 template<typename DTYPE>
 class KernelPdist{
@@ -67,7 +60,6 @@ public:
         pipe->InitBuffer(inQueSecond, BUFFER_NUM, 1ull * this->batchSize * this->alignedM * sizeof(DTYPE_X));
         pipe->InitBuffer(outQueY, BUFFER_NUM, this->copyOutBlock * sizeof(DTYPE_Y));
         pipe->InitBuffer(outQueBuffer, this->copyOutBlock * sizeof(float));
-        pipe->InitBuffer(workBuf, this->M * sizeof(float)); // shared work buffer for calculation
         if constexpr(std::is_same_v<DTYPE, half>){
             pipe->InitBuffer(castBuf, 1ull * this->batchSize * this->alignedM * sizeof(float)); // shared cast buffer
         }
@@ -76,13 +68,12 @@ public:
 
     __aicore__ inline void Process(){
         switch (this->pType){
-            case 2: {
+            case 0: { // L general
                 int i = this->i;
                 uint64_t pair = startPair;
                 int batch, next_batch;
                 AscendC::LocalTensor<DTYPE_CALC> outputBuffer = outQueBuffer.Get<DTYPE_CALC>();
                 AscendC::LocalTensor<DTYPE_Y> yLocal = outQueY.AllocTensor<DTYPE_Y>();
-                AscendC::LocalTensor<DTYPE_CALC> sharedTmpBuffer = workBuf.Get<DTYPE_CALC>();
                 AscendC::LocalTensor<DTYPE_CALC> castTmpBuffer;
                 if constexpr(std::is_same_v<DTYPE, half>) {
                     castTmpBuffer = castBuf.Get<DTYPE_CALC>();
@@ -98,7 +89,7 @@ public:
                     next_batch = min(min(N - next_j, (int)(endPair - pair - batch)), this->batchSize);
                     if (next_batch) CopyInSecondBatched(next_j, next_batch);
                     AscendC::LocalTensor<DTYPE_X> x2Local = inQueSecond.DeQue<DTYPE_X>();
-                    ComputeL2Batched(batch, pair, x1Local, x2Local, yLocal, outputBuffer, sharedTmpBuffer, castTmpBuffer);
+                    ComputeLgeneralBatched(batch, pair, this->pVal, x1Local, x2Local, yLocal, outputBuffer, castTmpBuffer);
                     inQueSecond.FreeTensor(x2Local);
                     if (j + batch == N) {
                         inQueFirst.FreeTensor(x1Local);
@@ -115,12 +106,16 @@ public:
                 }
                 break;
             }
-            case 3: {
+            case 1: { // L1
                 int i = this->i;
                 uint64_t pair = startPair;
                 int batch, next_batch;
+                AscendC::LocalTensor<DTYPE_CALC> outputBuffer = outQueBuffer.Get<DTYPE_CALC>();
                 AscendC::LocalTensor<DTYPE_Y> yLocal = outQueY.AllocTensor<DTYPE_Y>();
-                AscendC::LocalTensor<DTYPE_Y> sharedTmpBuffer = workBuf.Get<DTYPE_Y>();
+                AscendC::LocalTensor<DTYPE_CALC> castTmpBuffer;
+                if constexpr(std::is_same_v<DTYPE, half>) {
+                    castTmpBuffer = castBuf.Get<DTYPE_CALC>();
+                }
                 CopyInFirst(i);
                 AscendC::LocalTensor<DTYPE_X> x1Local = inQueFirst.DeQue<DTYPE_X>();
                 int j = this->j, next_j;
@@ -132,7 +127,78 @@ public:
                     next_batch = min(min(N - next_j, (int)(endPair - pair - batch)), this->batchSize);
                     if (next_batch) CopyInSecondBatched(next_j, next_batch);
                     AscendC::LocalTensor<DTYPE_X> x2Local = inQueSecond.DeQue<DTYPE_X>();
-                    ComputeLinfBatched(batch, pair, x1Local, x2Local, yLocal, sharedTmpBuffer);
+                    ComputeL1Batched(batch, pair, x1Local, x2Local, yLocal, outputBuffer, castTmpBuffer);
+                    inQueSecond.FreeTensor(x2Local);
+                    if (j + batch == N) {
+                        inQueFirst.FreeTensor(x1Local);
+                        if (pair < endPair) {
+                            CopyInFirst(++ i);
+                            x1Local = inQueFirst.DeQue<DTYPE_X>();    
+                        }
+                    }
+                    else if (pair == endPair){
+                        inQueFirst.FreeTensor(x1Local);
+                    }
+                    batch = next_batch;
+                    j = next_j;
+                }
+                break;
+            }
+            case 2: { // L2
+                int i = this->i;
+                uint64_t pair = startPair;
+                int batch, next_batch;
+                AscendC::LocalTensor<DTYPE_CALC> outputBuffer = outQueBuffer.Get<DTYPE_CALC>();
+                AscendC::LocalTensor<DTYPE_Y> yLocal = outQueY.AllocTensor<DTYPE_Y>();
+                AscendC::LocalTensor<DTYPE_CALC> castTmpBuffer;
+                if constexpr(std::is_same_v<DTYPE, half>) {
+                    castTmpBuffer = castBuf.Get<DTYPE_CALC>();
+                }
+                CopyInFirst(i);
+                AscendC::LocalTensor<DTYPE_X> x1Local = inQueFirst.DeQue<DTYPE_X>();
+                int j = this->j, next_j;
+                batch = min(min(N - j, (int)(endPair - pair)), this->batchSize);
+                CopyInSecondBatched(j, batch);
+                while (pair < endPair) {
+                    next_j = j + batch;
+                    if (next_j == N) next_j = (i + 1) + 1;
+                    next_batch = min(min(N - next_j, (int)(endPair - pair - batch)), this->batchSize);
+                    if (next_batch) CopyInSecondBatched(next_j, next_batch);
+                    AscendC::LocalTensor<DTYPE_X> x2Local = inQueSecond.DeQue<DTYPE_X>();
+                    ComputeL2Batched(batch, pair, x1Local, x2Local, yLocal, outputBuffer, castTmpBuffer);
+                    inQueSecond.FreeTensor(x2Local);
+                    if (j + batch == N) {
+                        inQueFirst.FreeTensor(x1Local);
+                        if (pair < endPair) {
+                            CopyInFirst(++ i);
+                            x1Local = inQueFirst.DeQue<DTYPE_X>();    
+                        }
+                    }
+                    else if (pair == endPair){
+                        inQueFirst.FreeTensor(x1Local);
+                    }
+                    batch = next_batch;
+                    j = next_j;
+                }
+                break;
+            }
+            case 3: { // L-inf
+                int i = this->i;
+                uint64_t pair = startPair;
+                int batch, next_batch;
+                AscendC::LocalTensor<DTYPE_Y> yLocal = outQueY.AllocTensor<DTYPE_Y>();
+                CopyInFirst(i);
+                AscendC::LocalTensor<DTYPE_X> x1Local = inQueFirst.DeQue<DTYPE_X>();
+                int j = this->j, next_j;
+                batch = min(min(N - j, (int)(endPair - pair)), this->batchSize);
+                CopyInSecondBatched(j, batch);
+                while (pair < endPair) {
+                    next_j = j + batch;
+                    if (next_j == N) next_j = (i + 1) + 1;
+                    next_batch = min(min(N - next_j, (int)(endPair - pair - batch)), this->batchSize);
+                    if (next_batch) CopyInSecondBatched(next_j, next_batch);
+                    AscendC::LocalTensor<DTYPE_X> x2Local = inQueSecond.DeQue<DTYPE_X>();
+                    ComputeLinfBatched(batch, pair, x1Local, x2Local, yLocal);
                     inQueSecond.FreeTensor(x2Local);
                     if (j + batch == N) {
                         inQueFirst.FreeTensor(x1Local);
@@ -180,11 +246,11 @@ private:
         while (currentLen > (elemsPerBlock * 8)) {
             int blockCount = (currentLen + elemsPerBlock - 1) / elemsPerBlock;
             int repeat = (blockCount + 7) / 8;
-            AscendC::SetVectorMask<half, AscendC::MaskMode::COUNTER>(currentLen);
+            AscendC::SetVectorMask<T, AscendC::MaskMode::COUNTER>(currentLen);
             AscendC::BlockReduceSum<T, false>(src, src, repeat, AscendC::MASK_PLACEHOLDER, 1, 1, 8);
             currentLen = blockCount;
         }
-        AscendC::SetVectorMask<half, AscendC::MaskMode::COUNTER>(currentLen);
+        AscendC::SetVectorMask<T, AscendC::MaskMode::COUNTER>(currentLen);
         AscendC::WholeReduceSum<T, false>(dst, src, AscendC::MASK_PLACEHOLDER, 1, 1, 1, 8);
         AscendC::SetMaskNorm();
         AscendC::ResetMask();  
@@ -198,11 +264,11 @@ private:
         while (currentLen > (elemsPerBlock * 8)) {
             int blockCount = (currentLen + elemsPerBlock - 1) / elemsPerBlock;
             int repeat = (blockCount + 7) / 8;
-            AscendC::SetVectorMask<half, AscendC::MaskMode::COUNTER>(currentLen);
+            AscendC::SetVectorMask<T, AscendC::MaskMode::COUNTER>(currentLen);
             AscendC::BlockReduceMax<T, false>(src, src, repeat, AscendC::MASK_PLACEHOLDER, 1, 1, 8);
             currentLen = blockCount;
         }
-        AscendC::SetVectorMask<half, AscendC::MaskMode::COUNTER>(currentLen);
+        AscendC::SetVectorMask<T, AscendC::MaskMode::COUNTER>(currentLen);
         AscendC::WholeReduceMax<T, false>(dst, src, AscendC::MASK_PLACEHOLDER, 1, 1, 1, 8, AscendC::ReduceOrder::ORDER_ONLY_VALUE);
         AscendC::SetMaskNorm();
         AscendC::ResetMask();  
@@ -210,12 +276,11 @@ private:
 
 private:
     __aicore__ inline void ComputeL2Batched(
-        int batch, uint64_t &pair,
+        int &batch, uint64_t &pair,
         AscendC::LocalTensor<DTYPE_X> &x1Local, 
         AscendC::LocalTensor<DTYPE_X> &x2Local, 
         AscendC::LocalTensor<DTYPE_Y> &yLocal,
         AscendC::LocalTensor<DTYPE_CALC> &outputBuffer,
-        AscendC::LocalTensor<DTYPE_CALC> &sharedTmpBuffer,
         AscendC::LocalTensor<DTYPE_CALC> &castTmpBuffer
     ){
         if constexpr(std::is_same_v<DTYPE, half>){ // float16
@@ -257,11 +322,10 @@ private:
     }
 
     __aicore__ inline void ComputeLinfBatched(
-        int batch, uint64_t &pair,
+        int &batch, uint64_t &pair,
         AscendC::LocalTensor<DTYPE_X> &x1Local, 
         AscendC::LocalTensor<DTYPE_X> &x2Local, 
-        AscendC::LocalTensor<DTYPE_Y> &yLocal,
-        AscendC::LocalTensor<DTYPE_Y> &sharedTmpBuffer
+        AscendC::LocalTensor<DTYPE_Y> &yLocal
     ){
         for (int i = 0; i < batch; i ++) {
             AscendC::Sub(x2Local[i * this->alignedM], x2Local[i * this->alignedM], x1Local, this->M);
@@ -275,6 +339,100 @@ private:
                 CopyOut(pair - this->bufferNum, this->bufferNum);
                 yLocal = outQueY.AllocTensor<DTYPE_Y>();
                 this->bufferNum = 0;
+            }
+        }
+    }
+
+    __aicore__ inline void ComputeL1Batched(
+        int &batch, uint64_t &pair,
+        AscendC::LocalTensor<DTYPE_X> &x1Local, 
+        AscendC::LocalTensor<DTYPE_X> &x2Local, 
+        AscendC::LocalTensor<DTYPE_Y> &yLocal,
+        AscendC::LocalTensor<DTYPE_CALC> &outputBuffer,
+        AscendC::LocalTensor<DTYPE_CALC> &castTmpBuffer
+    ){
+        if constexpr(std::is_same_v<DTYPE, half>){ // float16
+            for (int i = 0; i < batch; i ++) {
+                AscendC::Sub(x2Local[i * this->alignedM], x2Local[i * this->alignedM], x1Local, this->M);
+            }
+            AscendC::Abs(x2Local, x2Local, batch * this->alignedM);
+            AscendC::Cast(castTmpBuffer, x2Local, AscendC::RoundMode::CAST_NONE, batch * this->alignedM);
+            for (int i = 0; i < batch; i ++) {
+                reduceSum(outputBuffer[this->bufferNum ++], castTmpBuffer[i * this->alignedM], this->M);
+                pair ++;
+                if (this->bufferNum == this->copyOutBlock || pair == endPair) {
+                    AscendC::Cast(yLocal, outputBuffer, AscendC::RoundMode::CAST_NONE, this->bufferNum);
+                    outQueY.EnQue(yLocal);
+                    CopyOut(pair - this->bufferNum, this->bufferNum);
+                    yLocal = outQueY.AllocTensor<DTYPE_Y>();
+                    this->bufferNum = 0;
+                }
+            }
+        }
+        else{ // float32
+            for (int i = 0; i < batch; i ++) {
+                AscendC::Sub(x2Local[i * this->alignedM], x2Local[i * this->alignedM], x1Local, this->M);
+            }
+            AscendC::Abs(x2Local, x2Local, batch * this->alignedM);
+            for (int i = 0; i < batch; i ++) {
+                reduceSum(yLocal[this->bufferNum ++], x2Local[i * this->alignedM], this->M);
+                pair ++;
+                if (this->bufferNum == this->copyOutBlock || pair == endPair) {
+                    outQueY.EnQue(yLocal);
+                    CopyOut(pair - this->bufferNum, this->bufferNum);
+                    yLocal = outQueY.AllocTensor<DTYPE_Y>();
+                    this->bufferNum = 0;
+                }
+            }
+        }
+    }
+
+    __aicore__ inline void ComputeLgeneralBatched(
+        int &batch, uint64_t &pair, float &pVal,
+        AscendC::LocalTensor<DTYPE_X> &x1Local, 
+        AscendC::LocalTensor<DTYPE_X> &x2Local, 
+        AscendC::LocalTensor<DTYPE_Y> &yLocal,
+        AscendC::LocalTensor<DTYPE_CALC> &outputBuffer,
+        AscendC::LocalTensor<DTYPE_CALC> &castTmpBuffer
+    ){
+        DTYPE_CALC p = static_cast<DTYPE_CALC>(pVal);
+        DTYPE_CALC Rp = static_cast<DTYPE_CALC>(1 / pVal);
+        if constexpr(std::is_same_v<DTYPE, half>){ // float16
+            for (int i = 0; i < batch; i ++) {
+                AscendC::Sub(x2Local[i * this->alignedM], x2Local[i * this->alignedM], x1Local, this->M);
+            }
+            AscendC::Abs(x2Local, x2Local, batch * this->alignedM);
+            AscendC::Cast(castTmpBuffer, x2Local, AscendC::RoundMode::CAST_NONE, batch * this->alignedM);
+            AscendC::Power(castTmpBuffer, castTmpBuffer, p, batch * this->alignedM);
+            for (int i = 0; i < batch; i ++) {
+                reduceSum(outputBuffer[this->bufferNum ++], castTmpBuffer[i * this->alignedM], this->M);
+                pair ++;
+                if (this->bufferNum == this->copyOutBlock || pair == endPair) {
+                    AscendC::Power(outputBuffer, outputBuffer, Rp, this->bufferNum);
+                    AscendC::Cast(yLocal, outputBuffer, AscendC::RoundMode::CAST_NONE, this->bufferNum);
+                    outQueY.EnQue(yLocal);
+                    CopyOut(pair - this->bufferNum, this->bufferNum);
+                    yLocal = outQueY.AllocTensor<DTYPE_Y>();
+                    this->bufferNum = 0;
+                }
+            }
+        }
+        else{ // float32
+            for (int i = 0; i < batch; i ++) {
+                AscendC::Sub(x2Local[i * this->alignedM], x2Local[i * this->alignedM], x1Local, this->M);
+            }
+            AscendC::Abs(x2Local, x2Local, batch * this->alignedM);
+            AscendC::Power(x2Local, x2Local, p, batch * this->alignedM);
+            for (int i = 0; i < batch; i ++) {
+                reduceSum(yLocal[this->bufferNum ++], x2Local[i * this->alignedM], this->M);
+                pair ++;
+                if (this->bufferNum == this->copyOutBlock || pair == endPair) {
+                    AscendC::Power(yLocal, yLocal, Rp, this->bufferNum);
+                    outQueY.EnQue(yLocal);
+                    CopyOut(pair - this->bufferNum, this->bufferNum);
+                    yLocal = outQueY.AllocTensor<DTYPE_Y>();
+                    this->bufferNum = 0;
+                }
             }
         }
     }
@@ -299,7 +457,6 @@ private:
     AscendC::TQue<AscendC::TPosition::VECIN, BUFFER_NUM> inQueSecond;
     AscendC::TQue<AscendC::TPosition::VECOUT, BUFFER_NUM> outQueY;
     AscendC::TBuf<AscendC::TPosition::VECOUT> outQueBuffer;
-    AscendC::TBuf<AscendC::TPosition::VECCALC> workBuf;
     AscendC::TBuf<AscendC::TPosition::VECCALC> castBuf;
     AscendC::GlobalTensor<DTYPE_X> xGm;
     AscendC::GlobalTensor<DTYPE_Y> yGm;
