@@ -11,8 +11,7 @@ constexpr int copyOutTileB = 1024; //1KB //16384; // 16KB
 constexpr int32_t BUFFER_NUM = 2; // is Double Buffer ?
 
 namespace optiling {
-static ge::graphStatus TilingFunc(gert::TilingContext* context)
-{
+static ge::graphStatus TilingFunc(gert::TilingContext* context) {
     PdistTilingData tiling;
 
     // Attaining and setting alignNum

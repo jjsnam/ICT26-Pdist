@@ -21,6 +21,7 @@ public:
         if (endPair > totalPairs) {
             endPair = totalPairs;
         }
+        if (startPair >= endPair) return;
         this->startPair = startPair;
         this->endPair = endPair;
         int l = 0, r = N - 1, mid, ans;
@@ -35,8 +36,8 @@ public:
                 l = mid + 1;
             }
         }
-        this->i = ans;
-        this->j = startPair - 1ull * ans * (2 * N - ans - 1) / 2 + ans + 1;
+        this->startRow = ans;
+        this->startCol = startPair - 1ull * ans * (2 * N - ans - 1) / 2 + ans + 1;
         
         this->copyOutBlock = tiling_data.copyOutBlock;
 
@@ -71,7 +72,7 @@ public:
 
         switch (this->pType){
             case 0: { // L general
-                int i = this->i;
+                int i = this->startRow;
                 uint64_t pair = startPair;
                 int batch, next_batch;
                 AscendC::LocalTensor<DTYPE_CALC> outputBuffer = outQueBuffer.Get<DTYPE_CALC>();
@@ -82,7 +83,7 @@ public:
                 }
                 CopyInFirst(i);
                 AscendC::LocalTensor<DTYPE_X> x1Local = inQueFirst.DeQue<DTYPE_X>();
-                int j = this->j, next_j;
+                int j = this->startCol, next_j;
                 batch = min(min(N - j, (int)(endPair - pair)), this->batchSize);
                 CopyInSecondBatched(j, batch);
                 while (pair < endPair) {
@@ -109,7 +110,7 @@ public:
                 break;
             }
             case 1: { // L1
-                int i = this->i;
+                int i = this->startRow;
                 uint64_t pair = startPair;
                 int batch, next_batch;
                 AscendC::LocalTensor<DTYPE_CALC> outputBuffer = outQueBuffer.Get<DTYPE_CALC>();
@@ -120,7 +121,7 @@ public:
                 }
                 CopyInFirst(i);
                 AscendC::LocalTensor<DTYPE_X> x1Local = inQueFirst.DeQue<DTYPE_X>();
-                int j = this->j, next_j;
+                int j = this->startCol, next_j;
                 batch = min(min(N - j, (int)(endPair - pair)), this->batchSize);
                 CopyInSecondBatched(j, batch);
                 while (pair < endPair) {
@@ -147,7 +148,7 @@ public:
                 break;
             }
             case 2: { // L2
-                int i = this->i;
+                int i = this->startRow;
                 uint64_t pair = startPair;
                 int batch, next_batch;
                 AscendC::LocalTensor<DTYPE_CALC> outputBuffer = outQueBuffer.Get<DTYPE_CALC>();
@@ -158,7 +159,7 @@ public:
                 }
                 CopyInFirst(i);
                 AscendC::LocalTensor<DTYPE_X> x1Local = inQueFirst.DeQue<DTYPE_X>();
-                int j = this->j, next_j;
+                int j = this->startCol, next_j;
                 batch = min(min(N - j, (int)(endPair - pair)), this->batchSize);
                 CopyInSecondBatched(j, batch);
                 while (pair < endPair) {
@@ -185,13 +186,13 @@ public:
                 break;
             }
             case 3: { // L-inf
-                int i = this->i;
+                int i = this->startRow;
                 uint64_t pair = startPair;
                 int batch, next_batch;
                 AscendC::LocalTensor<DTYPE_Y> yLocal = outQueY.AllocTensor<DTYPE_Y>();
                 CopyInFirst(i);
                 AscendC::LocalTensor<DTYPE_X> x1Local = inQueFirst.DeQue<DTYPE_X>();
-                int j = this->j, next_j;
+                int j = this->startCol, next_j;
                 batch = min(min(N - j, (int)(endPair - pair)), this->batchSize);
                 CopyInSecondBatched(j, batch);
                 while (pair < endPair) {
@@ -442,7 +443,7 @@ private:
 private:
     int blockIdx;
     int N, M;
-    int i, j;
+    int startRow, startCol;
     int pType;
     float pVal;
     uint64_t startPair, endPair;
@@ -466,7 +467,7 @@ private:
 
 extern "C" __global__ __aicore__ void pdist(GM_ADDR x, GM_ADDR y, GM_ADDR workspace, GM_ADDR tiling) {
     GET_TILING_DATA(tiling_data, tiling);
-    
+
     AscendC::TPipe pipe;
     if (tiling_data.dataType == DT_FLOAT16){
         KernelPdist<half> op;
