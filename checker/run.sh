@@ -29,7 +29,7 @@ function main {
 
     # 2. 生成输入数据和真值数据
     cd $CURRENT_DIR
-    python3 scripts/gen_data.py --data_size $data_size --p $p --data_type $data_type --data_range $data_range
+    python3 scripts/gen_data.py --N $N --M $M --p $p --data_type $data_type --data_range $data_range
     if [ $? -ne 0 ]; then
         echo "[ERROR]: Generate input data failed!"
         return 1
@@ -43,7 +43,7 @@ function main {
     export LD_LIBRARY_PATH=$_ASCEND_INSTALL_PATH/opp/vendors/customize/op_api/lib:$LD_LIBRARY_PATH
     cd $CURRENT_DIR/output
     echo "[INFO]: Execute op!"
-    ./execute_pdist_op $data_size $p $data_type
+    ./execute_pdist_op $N $M $p $data_type
     if [ $? -ne 0 ]; then
         echo "[ERROR]: Acl executable run failed! please check your project!"
         return 1

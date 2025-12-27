@@ -156,25 +156,10 @@ aclDataType ParseDataType(const std::string &dataTypeStr) {
 }
 
 int main(int argc, char **argv) {
-    std::string g_conf_data_size = argv[1];
-    if (g_conf_data_size == "S"){
-        g_conf.N = 100;
-        g_conf.M = 400;
-    }
-    else if (g_conf_data_size == "M"){
-        g_conf.N = 2024;
-        g_conf.M = 3000;
-    }
-    else if (g_conf_data_size == "L"){
-        g_conf.N = 100000;
-        g_conf.M = 100000;
-    }
-    else {
-        ERROR_LOG("Invalid N M size option");
-        return FAILED;
-    }
-    g_conf.p = atof(argv[2]);
-    g_conf.dataType = ParseDataType(argv[3]);
+    g_conf.N = std::stoi(argv[1]);
+    g_conf.M = std::stoi(argv[2]);
+    g_conf.p = atof(argv[3]);
+    g_conf.dataType = ParseDataType(argv[4]);
 
     INFO_LOG("N=%d, M=%d, p=%.1f, dataType=%d", g_conf.N, g_conf.M, g_conf.p, g_conf.dataType);
 

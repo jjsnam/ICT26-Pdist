@@ -2,8 +2,9 @@
 # Pdist Operator Test Configuration
 # ==========================================
 
-# Data Size: S(100,400), M(2024,3000), L(100000,100000)
-data_size=M
+# Data Size: Small(100,400), Middle(2024,3000), Large(100000,100000)
+N=2024
+M=3000
 
 # P-norm value: e.g., 1.0, 2.0, inf, -2.0
 p=2.0

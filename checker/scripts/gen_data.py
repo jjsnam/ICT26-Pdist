@@ -10,7 +10,8 @@ import time
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Generate Pdist Golden Data")
-    parser.add_argument("--data_size", type=str, required=True, choices=['S', 'M', 'L'], help="Size: S(100,400), M(2024,3000), L(100000,100000)")
+    parser.add_argument("--N", type=int, required=True, help="Size: S(100,400), M(2024,3000), L(100000,100000)")
+    parser.add_argument("--M", type=int, required=True, help="Size: S(100,400), M(2024,3000), L(100000,100000)")
     parser.add_argument("--p", type=float, default=2.0, help="p-norm value")
     parser.add_argument("--data_type", type=str, default="float", choices=['float', 'float16', 'float32'], help="Data type (float/float32 are treated as float32)")
     parser.add_argument("--data_range", type=str, required=True, choices=['S', 'M', 'L'], help="Range: S(-1~1), M(1~10), L(-1000~1000)")
@@ -24,26 +25,17 @@ def ensure_dir(directory):
 def gen_golden_data():
     args = parse_args()
 
-    size_map = {
-        'S': (100, 400),
-        'M': (2024, 3000),
-        'L': (100000, 100000)
-    }
     range_map = {
         'S': (-1.0, 1.0),
         'M': (1.0, 10.0),
         'L': (-1000.0, 1000.0)
     }
     
-    N, M = size_map[args.data_size]
+    N, M = args.N, args.M
     min_val, max_val = range_map[args.data_range]
     
-    if args.data_size == 'L':
-        device = torch.device('npu')
-        device_str = 'NPU'
-    else:
-        device = torch.device('cpu')
-        device_str = 'CPU'
+    device = torch.device('cpu')
+    device_str = 'CPU'
     
     # 设置数据类型
     if args.data_type == 'float16':
