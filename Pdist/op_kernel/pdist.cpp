@@ -56,7 +56,7 @@ public:
         xGm.SetGlobalBuffer((__gm__ DTYPE_X *)x, 1ull * N * M);
         yGm.SetGlobalBuffer((__gm__ DTYPE_Y *)y, (1ull * N * (N - 1) / 2 + this->alignNum - 1) / this->alignNum * this->alignNum); // aligned output
         pipe = pipeIn;
-        pipe->InitBuffer(inQueFirst, BUFFER_NUM, this->alignedM * sizeof(DTYPE_X));
+        pipe->InitBuffer(inQueFirst, 1, this->alignedM * sizeof(DTYPE_X));
         pipe->InitBuffer(inQueSecond, BUFFER_NUM, 1ull * this->batchSize * this->alignedM * sizeof(DTYPE_X));
         pipe->InitBuffer(outQueY, BUFFER_NUM, this->copyOutBlock * sizeof(DTYPE_Y));
         pipe->InitBuffer(outQueBuffer, this->copyOutBlock * sizeof(float));
@@ -67,6 +67,8 @@ public:
     }
 
     __aicore__ inline void Process(){
+        if (this->startPair >= this->endPair) return;
+
         switch (this->pType){
             case 0: { // L general
                 int i = this->i;

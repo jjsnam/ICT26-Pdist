@@ -7,7 +7,7 @@
 
 const double ZERO = 1e-12;
 constexpr int alignSizeB = 32; // aligning with 32 bytes
-constexpr int copyOutTileB = 16384; //1KB //16384; // 16KB
+constexpr int copyOutTileB = 1024; //1KB //16384; // 16KB
 constexpr int32_t BUFFER_NUM = 2; // is Double Buffer ?
 
 namespace optiling {
@@ -64,8 +64,7 @@ static ge::graphStatus TilingFunc(gert::TilingContext* context)
     auto coreNum = ascendcPlatform.GetCoreNum(); // 40 for Ascend 910B4
 
     uint64_t ubSizeRemain = ubSize - // Total ubSize
-                            copyOutTileB * BUFFER_NUM - // copyOutTile's size in Byte
-                            M * 4 - // work Buffer size in Byte
+                            copyOutTileB * (BUFFER_NUM + 1) - // copyOutTile's size in Byte
                             alignedM * typeSizeB; // inQue1's size in Byte
     int batchSize = ubSizeRemain / (alignedM * BUFFER_NUM * ((typeSizeB == 2 ? 6 : 4) + (tiling.get_pType() == 0 ? 4 : 0)) + 2);
     tiling.set_batchSize(batchSize);
