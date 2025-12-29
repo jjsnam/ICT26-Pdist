@@ -35,16 +35,16 @@ static ge::graphStatus TilingFunc(gert::TilingContext* context) {
         return ge::GRAPH_FAILED;
     }
     if (fabs(pVal - 1.0) < ZERO){
-        tiling.set_pType(1);
+        tiling.set_pType(Manhattan);
     }
     else if (fabs(pVal - 2.0) < ZERO){
-        tiling.set_pType(2);
+        tiling.set_pType(Euclidean);
     }
     else if (std::isinf(pVal)){
-        tiling.set_pType(3);
+        tiling.set_pType(Chebyshev);
     }
     else{
-        tiling.set_pType(0);
+        tiling.set_pType(General);
     }
 
     // Dealing with input shape

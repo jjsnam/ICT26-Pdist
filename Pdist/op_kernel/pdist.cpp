@@ -5,6 +5,7 @@ static constexpr int BUFFER_NUM = 2;
 template<typename DTYPE>
 class KernelPdist{
     using DTYPE_CALC = std::conditional_t<std::is_same_v<DTYPE, half>, float, DTYPE_Y>;
+    enum CalcType { General = 0, Manhattan = 1, Euclidean = 2, Chebyshev = 3 };
 public:
     __aicore__ inline KernelPdist() {}
     __aicore__ inline ~KernelPdist() {}
@@ -41,7 +42,7 @@ public:
         
         this->copyOutBlock = tiling_data.copyOutBlock;
 
-        this->pType = tiling_data.pType;
+        this->pType = static_cast<CalcType>(tiling_data.pType);
         this->pVal = tiling_data.pVal;
 
         this->batchSize = tiling_data.batchSize;
@@ -71,7 +72,7 @@ public:
         if (this->startPair >= this->endPair) return;
 
         switch (this->pType){
-            case 0: { // L general
+            case General: { // L general
                 int i = this->startRow;
                 uint64_t pair = startPair;
                 int batch, next_batch;
@@ -109,7 +110,7 @@ public:
                 }
                 break;
             }
-            case 1: { // L1
+            case Manhattan: { // L1
                 int i = this->startRow;
                 uint64_t pair = startPair;
                 int batch, next_batch;
@@ -147,7 +148,7 @@ public:
                 }
                 break;
             }
-            case 2: { // L2
+            case Euclidean: { // L2
                 int i = this->startRow;
                 uint64_t pair = startPair;
                 int batch, next_batch;
@@ -185,7 +186,7 @@ public:
                 }
                 break;
             }
-            case 3: { // L-inf
+            case Chebyshev: { // L-inf
                 int i = this->startRow;
                 uint64_t pair = startPair;
                 int batch, next_batch;
@@ -444,7 +445,8 @@ private:
     int blockIdx;
     int N, M;
     int startRow, startCol;
-    int pType;
+    // int pType;
+    CalcType pType;
     float pVal;
     uint64_t startPair, endPair;
     uint64_t copyOutBlock;
