@@ -50,11 +50,11 @@ static ge::graphStatus TilingFunc(gert::TilingContext* context) {
 
     // Dealing with input shape
     const gert::StorageShape* x_shape = context->GetInputShape(0);
-    const int N = x_shape->GetStorageShape().GetDim(0);
-    const int M = x_shape->GetStorageShape().GetDim(1);
+    const int64_t N = x_shape->GetStorageShape().GetDim(0);
+    const int64_t M = x_shape->GetStorageShape().GetDim(1);
     tiling.set_N(N);
     tiling.set_M(M);
-    const int alignedM = (M + alignNum - 1) / alignNum * alignNum;
+    const int64_t alignedM = (M + alignNum - 1) / alignNum * alignNum;
     tiling.set_alignedM(alignedM);
 
     // Attaining platfom info
@@ -66,7 +66,7 @@ static ge::graphStatus TilingFunc(gert::TilingContext* context) {
     int64_t ubSizeRemain = static_cast<int64_t>(ubSize) - // Total ubSize
                             copyOutTileB * (BUFFER_NUM + 1) - // copyOutTile's size in Byte
                             BUFFER_NUM * alignedM * typeSizeB; // inQue1's size in Byte
-    int batchSize = ubSizeRemain / (alignedM * BUFFER_NUM * ((typeSizeB == 2 ? 6 : 4) + (tiling.get_pType() == General ? 4 : 0)));
+    int64_t batchSize = ubSizeRemain / (alignedM * BUFFER_NUM * ((typeSizeB == 2 ? 6 : 4) + (tiling.get_pType() == General ? 4 : 0)));
     if (batchSize <= 0) { // Huge data detected
         std::cout << "Huge M detected." << std::endl;
         batchSize = 1;

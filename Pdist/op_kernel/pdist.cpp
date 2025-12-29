@@ -81,6 +81,8 @@ public:
             pipe->InitBuffer(accBuffer, MAX_ACC_BUF_SIZE);
         }
         this->bufferNum = 0;
+
+        AscendC::printf("%");
     }
 
     __aicore__ inline void Process(){
@@ -143,26 +145,26 @@ public:
 private:
     __aicore__ inline void CopyInFirst(const int &i){
         AscendC::LocalTensor<DTYPE_X> x1Local = inQueFirst.AllocTensor<DTYPE_X>();
-        AscendC::DataCopy(x1Local, xGm[i * this->M], this->alignedM);
+        AscendC::DataCopy(x1Local, xGm[1ull * i * this->M], this->alignedM);
         inQueFirst.EnQue(x1Local);
     }
 
     __aicore__ inline void CopyInSecond(const int &j, const int &batch){
         this->copyParams.blockCount = batch;
         AscendC::LocalTensor<DTYPE_X> x2Local = inQueSecond.AllocTensor<DTYPE_X>();
-        AscendC::DataCopyPad(x2Local, xGm[j * this->M], this->copyParams, this->padParams);
+        AscendC::DataCopyPad(x2Local, xGm[1ull * j * this->M], this->copyParams, this->padParams);
         inQueSecond.EnQue(x2Local);
     }
 
     __aicore__ inline void CopyInFirstHuge(int i, int offset, int totalElements){
         AscendC::LocalTensor<DTYPE_X> x1Local = inQueFirst.AllocTensor<DTYPE_X>();
-        AscendC::DataCopy(x1Local, xGm[i * this->M + offset], (totalElements + this->alignNum - 1) / this->alignNum * this->alignNum);
+        AscendC::DataCopy(x1Local, xGm[1ull * i * this->M + offset], (totalElements + this->alignNum - 1) / this->alignNum * this->alignNum);
         inQueFirst.EnQue(x1Local);
     }
 
     __aicore__ inline void CopyInSecondHuge(int j, int offset, int totalElements){
         AscendC::LocalTensor<DTYPE_X> x2Local = inQueSecond.AllocTensor<DTYPE_X>();
-        AscendC::DataCopy(x2Local, xGm[j * this->M + offset], (totalElements + this->alignNum - 1) / this->alignNum * this->alignNum);
+        AscendC::DataCopy(x2Local, xGm[1ull * j * this->M + offset], (totalElements + this->alignNum - 1) / this->alignNum * this->alignNum);
         inQueSecond.EnQue(x2Local);
     }
 
