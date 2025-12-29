@@ -337,7 +337,7 @@ bool OpRunner::RunOp()
     INFO_LOG("Execute aclnnPdist success");
 
     // The unit of 5000 is ms.
-    ret = aclrtSynchronizeStreamWithTimeout(stream, 5000);
+    ret = aclrtSynchronizeStreamWithTimeout(stream, 50000);
     if (ret != SUCCESS) {
         ERROR_LOG("Synchronize stream failed. error code is %d", static_cast<int32_t>(ret));
         (void)aclrtDestroyStream(stream);
