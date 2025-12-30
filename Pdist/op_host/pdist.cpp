@@ -7,7 +7,7 @@
 
 const double ZERO = 1e-12;
 constexpr int alignSizeB = 32; // aligning with 32 bytes
-constexpr int copyOutTileB = 1024; // 1KB 
+constexpr int copyOutTileB = 4096; // 
 constexpr int32_t BUFFER_NUM = 2; // is Double Buffer ?
 static constexpr int MAX_ACC_BUF_SIZE = 256; // 256B (8 block)
 
@@ -31,22 +31,24 @@ static ge::graphStatus TilingFunc(gert::TilingContext* context) {
     const float pVal = (p_ptr != nullptr) ? *p_ptr : 2.0f;
     tiling.set_pVal(pVal);
 
+    CalcType pType;
     if (pVal < 0.0){
         // p must be non-negative
         return ge::GRAPH_FAILED;
     }
     if (fabs(pVal - 1.0) < ZERO){
-        tiling.set_pType(Manhattan);
+        pType = Manhattan;
     }
     else if (fabs(pVal - 2.0) < ZERO){
-        tiling.set_pType(Euclidean);
+        pType = Euclidean;
     }
     else if (std::isinf(pVal)){
-        tiling.set_pType(Chebyshev);
+        pType = Chebyshev;
     }
     else{
-        tiling.set_pType(General);
+        pType = General;
     }
+    tiling.set_pType(pType);
 
     // Dealing with input shape
     const gert::StorageShape* x_shape = context->GetInputShape(0);
@@ -64,15 +66,15 @@ static ge::graphStatus TilingFunc(gert::TilingContext* context) {
     auto coreNum = ascendcPlatform.GetCoreNum(); // 40 for Ascend 910B4
 
     int64_t ubSizeRemain = static_cast<int64_t>(ubSize) - // Total ubSize
-                            copyOutTileB * (BUFFER_NUM + 1) - // copyOutTile's size in Byte
-                            BUFFER_NUM * alignedM * typeSizeB; // inQue1's size in Byte
-    int64_t batchSize = ubSizeRemain / (alignedM * BUFFER_NUM * ((typeSizeB == 2 ? 6 : 4) + (tiling.get_pType() == General ? 4 : 0)));
+                           copyOutTileB * (BUFFER_NUM + 1) - // copyOutTile's size in Byte
+                           BUFFER_NUM * alignedM * typeSizeB; // inQue1's size in Byte
+    int64_t batchSize = ubSizeRemain / (alignedM * BUFFER_NUM * ((typeSizeB == 2 && pType != 3 ? 6 : 4) + (pType == General ? 4 : 0)));
     if (batchSize <= 0) { // Huge data detected
         std::cout << "Huge M detected." << std::endl;
         batchSize = 1;
         tiling.set_isHugeData(true);
         ubSizeRemain += BUFFER_NUM * alignedM * typeSizeB - BUFFER_NUM * sizeof(float) - MAX_ACC_BUF_SIZE; // Now inQue1 need double buffer too, and a 256B accumulate buffer
-        int maxM = ubSizeRemain / (BUFFER_NUM * ((typeSizeB == 2 ? 10 : 8) + (tiling.get_pType() == General ? 4 : 0)));
+        int maxM = ubSizeRemain / (BUFFER_NUM * ((typeSizeB == 2 && pType != 3 ? 10 : 8) + (pType == General ? 4 : 0)));
         int processM = maxM / alignNum * alignNum;
         tiling.set_processM(processM);
     }

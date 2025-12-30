@@ -29,20 +29,7 @@ public:
         if (startPair >= endPair) return;
         this->startPair = startPair;
         this->endPair = endPair;
-        int l = 0, r = N - 1, mid, ans;
-        while (l <= r){
-            mid = (l + r) >> 1;
-            uint64_t totalPairs = 1ull * (mid + 1) * (2 * N - mid - 2) / 2;
-            if (totalPairs > startPair){
-                ans = mid;
-                r = mid - 1;
-            }
-            else{
-                l = mid + 1;
-            }
-        }
-        this->startRow = ans;
-        this->startCol = startPair - 1ull * ans * (2 * N - ans - 1) / 2 + ans + 1;
+        InitGetStartIndex();
         
         this->copyOutBlock = tiling_data.copyOutBlock;
 
@@ -69,7 +56,7 @@ public:
         pipe->InitBuffer(inQueSecond, BUFFER_NUM, 1ull * this->batchSize * this->processM * sizeof(DTYPE_X));
         pipe->InitBuffer(outQueY, BUFFER_NUM, this->copyOutBlock * sizeof(DTYPE_Y));
         pipe->InitBuffer(outQueBuffer, this->copyOutBlock * sizeof(float));
-        if constexpr (std::is_same_v<DTYPE, half>) {
+        if constexpr (std::is_same_v<DTYPE, half> && std::is_same_v<DTYPE_CALC, float>) {
             pipe->InitBuffer(castBuffer, 1ull * this->batchSize * this->processM * sizeof(float)); // shared cast buffer
         }
         if constexpr (DSCALE == Huge) {
@@ -84,12 +71,31 @@ public:
         if constexpr (DSCALE == Huge) ProcessHuge();
         else ProcessNormal();
     }
+
+private:
+    __aicore__ inline void InitGetStartIndex() {
+        int l = 0, r = N - 1, mid, ans;
+        while (l <= r){
+            mid = (l + r) >> 1;
+            uint64_t totalPairs = 1ull * (mid + 1) * (2 * N - mid - 2) / 2;
+            if (totalPairs > startPair){
+                ans = mid;
+                r = mid - 1;
+            }
+            else{
+                l = mid + 1;
+            }
+        }
+        this->startRow = ans;
+        this->startCol = startPair - 1ull * ans * (2 * N - ans - 1) / 2 + ans + 1;
+    }
+
 private:
     __aicore__ inline void ProcessNormal() {
         AscendC::LocalTensor<DTYPE_CALC> outputBuffer = outQueBuffer.Get<DTYPE_CALC>();
         AscendC::LocalTensor<DTYPE_Y> yLocal = outQueY.AllocTensor<DTYPE_Y>();
         AscendC::LocalTensor<DTYPE_CALC> castTmpBuffer;
-        if constexpr(std::is_same_v<DTYPE, half>) {
+        if constexpr(std::is_same_v<DTYPE, half> && std::is_same_v<DTYPE_CALC, float>) {
             castTmpBuffer = castBuffer.Get<DTYPE_CALC>();
         }
         int pair = startPair;
@@ -115,12 +121,13 @@ private:
         AscendC::LocalTensor<DTYPE_Y> yLocal = outQueY.AllocTensor<DTYPE_Y>();
         AscendC::LocalTensor<DTYPE_CALC> castTmpBuffer;
         AscendC::LocalTensor<DTYPE_CALC> accumulateBuffer = accBuffer.Get<DTYPE_CALC>();
-        if constexpr (std::is_same_v<DTYPE, half>) {
+        if constexpr (std::is_same_v<DTYPE, half> && std::is_same_v<DTYPE_CALC, float>) {
             castTmpBuffer = castBuffer.Get<DTYPE_CALC>();
         }
         int i = this->startRow, j = this->startCol;
         int pair = startPair;
         for (; i < N && pair < endPair; i ++) {
+            #pragma unroll(4)
             for (; j < N && pair < endPair; j ++) {
                 DTYPE_CALC zero = 0;
                 AscendC::Duplicate(accumulateBuffer, zero, MAX_ACC_BUF_SIZE / sizeof(DTYPE_CALC));
@@ -467,48 +474,35 @@ __aicore__ inline void RunOp(GM_ADDR &x, GM_ADDR &y, PdistTilingData &tiling_dat
     op.Process();
 }
 
+template<typename DTYPE, DataScale DSCALE>
+__aicore__ inline void DispatchPType(GM_ADDR &x, GM_ADDR &y, PdistTilingData &tiling_data) {
+    switch (tiling_data.pType) {
+        case General: RunOp<DTYPE, DSCALE, General>(x, y, tiling_data); break;
+        case Manhattan: RunOp<DTYPE, DSCALE, Manhattan>(x, y, tiling_data); break;
+        case Euclidean: RunOp<DTYPE, DSCALE, Euclidean>(x, y, tiling_data); break;
+        case Chebyshev: RunOp<DTYPE, DSCALE, Chebyshev>(x, y, tiling_data); break;
+        default: break;
+    }
+}
+
 extern "C" __global__ __aicore__ void pdist(GM_ADDR x, GM_ADDR y, GM_ADDR workspace, GM_ADDR tiling) {
     GET_TILING_DATA(tiling_data, tiling);
 
     AscendC::TPipe pipe;
     if (tiling_data.isHugeData) {
         if (tiling_data.dataType == DT_FLOAT16){
-            switch (tiling_data.pType) {
-                case General: RunOp<half, Huge, General>(x, y, tiling_data); break;
-                case Manhattan: RunOp<half, Huge, Manhattan>(x, y, tiling_data); break;
-                case Euclidean: RunOp<half, Huge, Euclidean>(x, y, tiling_data); break;
-                case Chebyshev: RunOp<half, Huge, Chebyshev>(x, y, tiling_data); break;
-                default: break;
-            }
+            DispatchPType<half, Huge>(x, y, tiling_data);
         }
         else{
-            switch (tiling_data.pType) {
-                case General: RunOp<float, Huge, General>(x, y, tiling_data); break;
-                case Manhattan: RunOp<float, Huge, Manhattan>(x, y, tiling_data); break;
-                case Euclidean: RunOp<float, Huge, Euclidean>(x, y, tiling_data); break;
-                case Chebyshev: RunOp<float, Huge, Chebyshev>(x, y, tiling_data); break;
-                default: break;
-            }
+            DispatchPType<float, Huge>(x, y, tiling_data);
         } 
     }
     else {
         if (tiling_data.dataType == DT_FLOAT16){
-            switch (tiling_data.pType) {
-                case General: RunOp<half, Normal, General>(x, y, tiling_data); break;
-                case Manhattan: RunOp<half, Normal, Manhattan>(x, y, tiling_data); break;
-                case Euclidean: RunOp<half, Normal, Euclidean>(x, y, tiling_data); break;
-                case Chebyshev: RunOp<half, Normal, Chebyshev>(x, y, tiling_data); break;
-                default: break;
-            }
+            DispatchPType<half, Normal>(x, y, tiling_data);
         }
         else{
-            switch (tiling_data.pType) {
-                case General: RunOp<float, Normal, General>(x, y, tiling_data); break;
-                case Manhattan: RunOp<float, Normal, Manhattan>(x, y, tiling_data); break;
-                case Euclidean: RunOp<float, Normal, Euclidean>(x, y, tiling_data); break;
-                case Chebyshev: RunOp<float, Normal, Chebyshev>(x, y, tiling_data); break;
-                default: break;
-            }
+            DispatchPType<float, Normal>(x, y, tiling_data);
         } 
     }
 }
