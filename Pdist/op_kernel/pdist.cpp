@@ -13,7 +13,10 @@
 #include "kernel_operator.h"
 
 static constexpr int BUFFER_NUM = 2; // Buffer number
-static constexpr int ACC_BUF_SIZE = 256; // Huge data handling's accumulate buffer (256B as 8 block)
+
+static constexpr int ACC_BLOCK_SIZE = 256; // Huge data handling's accumulate buffer (256B as a block (8 datablocks))
+static constexpr int TILE_HUGE = 16; // Tile size when computing huge scale data
+static constexpr int ACC_BUF_SIZE = TILE_HUGE * ACC_BLOCK_SIZE; // Total buffer's size
 
 /**
  * @brief Same declaration of DataScale and CalcType, see op_host/pdist.cpp for detail
@@ -71,7 +74,7 @@ public:
 
         this->processM = tiling_data.processM;
 
-        this->accBlock = ACC_BUF_SIZE / sizeof(DTYPE_CALC);
+        this->accBlock = ACC_BLOCK_SIZE / sizeof(DTYPE_CALC); // Total number of data blocks (8)
         this->accNum = this->bufferNum = 0;
         
         // Batched Copy Params (padding 0 for unaligned tail elements)
@@ -167,6 +170,8 @@ private:
 
     /**
      * @brief Process logic for huge data scale
+     *
+     * @details Use tiling to improve data reuse and reduce memory access
      */
     __aicore__ inline void ProcessHuge() {
         AscendC::LocalTensor<DTYPE_Y> yLocal = outQueY.AllocTensor<DTYPE_Y>();
@@ -179,18 +184,24 @@ private:
         int i = this->startI, j = this->startJ;
         int pair = startPair;
         for (; i < N && pair < endPair; i ++) {
-            for (; j < N && pair < endPair; j ++) {
+            for (; j < N && pair < endPair; j += TILE_HUGE) {
+                int tileSize = min(min(N - j, endPair - pair), TILE_HUGE); // Get the remain tile size
+
                 DTYPE_CALC zero = 0;
-                AscendC::Duplicate(accumulateBuffer, zero, this->accBlock); // Initialize accumulate buffer
+                AscendC::Duplicate(accumulateBuffer, zero, this->accBlock * tileSize); // Initialize accumulate buffer
+
                 for (int offset = 0, totalElements; offset < this->M; offset += totalElements) { // Iterate each tile of the vectors
                     totalElements = min(this->M - offset, this->processM);
+                    // Copy in the first vector only once
                     CopyInFirstHuge(i, offset, totalElements);
-                    CopyInSecondHuge(j, offset, totalElements);
                     AscendC::LocalTensor<DTYPE_X> x1Local = inQueFirst.DeQue<DTYPE_X>();
-                    AscendC::LocalTensor<DTYPE_X> x2Local = inQueSecond.DeQue<DTYPE_X>();
-                    ComputeHuge(pair, totalElements, offset, x1Local, x2Local, yLocal, outputBuffer, castTmpBuffer, accumulateBuffer);
+                    for (int k = 0; k < tileSize; k ++) {
+                        CopyInSecondHuge(j + k, offset, totalElements);
+                        AscendC::LocalTensor<DTYPE_X> x2Local = inQueSecond.DeQue<DTYPE_X>();
+                        ComputeHuge(pair, totalElements, offset, x1Local, x2Local, yLocal, outputBuffer, castTmpBuffer, accumulateBuffer[k * this->accBlock]);
+                        inQueSecond.FreeTensor(x2Local);
+                    }
                     inQueFirst.FreeTensor(x1Local);
-                    inQueSecond.FreeTensor(x2Local);
                 }
             }
             j = i + 2;
@@ -202,13 +213,13 @@ private:
  * @brief Data Copy Implementations
  */
 private:
-    __aicore__ inline void CopyInFirstNormal(const int &i){
+    __aicore__ inline void CopyInFirstNormal(const int i){
         AscendC::LocalTensor<DTYPE_X> x1Local = inQueFirst.AllocTensor<DTYPE_X>();
         AscendC::DataCopy(x1Local, xGm[1ull * i * this->M], this->alignedM);
         inQueFirst.EnQue(x1Local);
     }
 
-    __aicore__ inline void CopyInSecondNormal(const int &j, const int &batch){
+    __aicore__ inline void CopyInSecondNormal(const int j, const int batch){
         this->copyParams.blockCount = batch;
         AscendC::LocalTensor<DTYPE_X> x2Local = inQueSecond.AllocTensor<DTYPE_X>();
         // Batched copy with padding
@@ -216,20 +227,20 @@ private:
         inQueSecond.EnQue(x2Local);
     }
 
-    __aicore__ inline void CopyInFirstHuge(int &i, int &offset, int &totalElements){
+    __aicore__ inline void CopyInFirstHuge(int i, int offset, int totalElements){
         AscendC::LocalTensor<DTYPE_X> x1Local = inQueFirst.AllocTensor<DTYPE_X>();
         // offset is needed, and copy number needs to be aligned in 32B, so using ceiling
         AscendC::DataCopy(x1Local, xGm[1ull * i * this->M + offset], (totalElements + this->alignNum - 1) / this->alignNum * this->alignNum);
         inQueFirst.EnQue(x1Local);
     }
 
-    __aicore__ inline void CopyInSecondHuge(int &j, int &offset, int &totalElements){
+    __aicore__ inline void CopyInSecondHuge(int j, int offset, int totalElements){
         AscendC::LocalTensor<DTYPE_X> x2Local = inQueSecond.AllocTensor<DTYPE_X>();
         AscendC::DataCopy(x2Local, xGm[1ull * j * this->M + offset], (totalElements + this->alignNum - 1) / this->alignNum * this->alignNum);
         inQueSecond.EnQue(x2Local);
     }
 
-    __aicore__ inline void CopyOut(int startIdx, int &outSizeB) {
+    __aicore__ inline void CopyOut(int startIdx, int outSizeB) {
         AscendC::LocalTensor<DTYPE_Y> yLocal = outQueY.DeQue<DTYPE_Y>();
         // Use ceiling to align the output size in 32B
         DataCopy(yGm[startIdx], yLocal, (outSizeB + this->alignNum - 1) / this->alignNum * this->alignNum);
@@ -449,7 +460,7 @@ private:
         AscendC::LocalTensor<DTYPE_Y> &yLocal,
         AscendC::LocalTensor<DTYPE_CALC> &outputBuffer,
         AscendC::LocalTensor<DTYPE_CALC> &castTmpBuffer,
-        AscendC::LocalTensor<DTYPE_CALC> &accumulateBuffer
+        AscendC::LocalTensor<DTYPE_CALC> accumulateBuffer
     ){
         if constexpr(std::is_same_v<DTYPE, half>){ // float16
             AscendC::Sub(x2Local, x2Local, x1Local, totalElements);

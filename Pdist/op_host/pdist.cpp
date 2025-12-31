@@ -21,7 +21,10 @@ constexpr int sizeFP16 = 2; // sizeof(half)
 constexpr int alignSizeB = 32; // aligning with 32 bytes
 constexpr int copyOutTileB = 4096; // Total bytes of a block when copy out (adjustable for better performance)
 constexpr int BUFFER_NUM = 2; // Buffer number
-constexpr int ACC_BUF_SIZE = 256; // Huge data handling's accumulate buffer (256B as 8 block)
+
+static constexpr int ACC_BLOCK_SIZE = 256; // Huge data handling's accumulate buffer (256B as a block (8 datablocks))
+static constexpr int TILE_HUGE = 16; // Tile size when computing huge scale data
+static constexpr int ACC_BUF_SIZE = TILE_HUGE * ACC_BLOCK_SIZE; // Total buffer's size
 
 /**
  * @brief Declaration of the p-dist kernel calculation type and the data's handle logic
