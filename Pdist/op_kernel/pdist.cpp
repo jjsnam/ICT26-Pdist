@@ -23,6 +23,10 @@ static constexpr int ACC_BUF_SIZE = TILE_HUGE * ACC_BLOCK_SIZE; // Total buffer'
  */
 enum DataScale { Normal = 0, Huge = 1 };
 enum CalcType { General = 0, Manhattan = 1, Euclidean = 2, Chebyshev = 3 };
+/**
+ * @brief Reduce type enum declaration for manually implemented reduce logics
+ */
+enum ReduceType { Sum = 0, Max = 1 };
 
 /**
  * @brief p-dist Ascend C operator kernel implementation (class with template)
@@ -257,8 +261,8 @@ private:
  * But for Huge Size, we can use add/max to store the reduce into accumulate buffer, and finally WholeReduce only once
  */
 private:
-    template <typename T>
-    __aicore__ inline void ReduceSumNormal(const AscendC::LocalTensor<T>& dst, const AscendC::LocalTensor<T>& src, const int &totalElements) {   
+    template <typename T, ReduceType RTYPE>
+    __aicore__ inline void ReduceNormal(const AscendC::LocalTensor<T>& dst, const AscendC::LocalTensor<T>& src, const int &totalElements) {   
         constexpr int elemsPerBlock = 32 / sizeof(T);
         int currentLen = totalElements;
         AscendC::SetMaskCount();
@@ -266,36 +270,28 @@ private:
             int blockCount = (currentLen + elemsPerBlock - 1) / elemsPerBlock;
             int repeat = (blockCount + 7) / 8;
             AscendC::SetVectorMask<T, AscendC::MaskMode::COUNTER>(currentLen);
-            AscendC::BlockReduceSum<T, false>(src, src, repeat, AscendC::MASK_PLACEHOLDER, 1, 1, 8);
+            if constexpr (RTYPE == Sum) {
+                AscendC::BlockReduceSum<T, false>(src, src, repeat, AscendC::MASK_PLACEHOLDER, 1, 1, 8);
+            }
+            if constexpr (RTYPE == Max) {
+                AscendC::BlockReduceMax<T, false>(src, src, repeat, AscendC::MASK_PLACEHOLDER, 1, 1, 8);
+            }
             currentLen = blockCount;
         }
         AscendC::SetVectorMask<T, AscendC::MaskMode::COUNTER>(currentLen);
         // WholeReduce Once
-        AscendC::WholeReduceSum<T, false>(dst, src, AscendC::MASK_PLACEHOLDER, 1, 1, 1, 8);
-        AscendC::SetMaskNorm();
-        AscendC::ResetMask();  
-    }
-
-    template <typename T>
-    __aicore__ inline void ReduceMaxNormal(const AscendC::LocalTensor<T>& dst, const AscendC::LocalTensor<T>& src, const int &totalElements) {   
-        constexpr int elemsPerBlock = 32 / sizeof(T);
-        int currentLen = totalElements;
-        AscendC::SetMaskCount();
-        while (currentLen > (elemsPerBlock * 8)) {
-            int blockCount = (currentLen + elemsPerBlock - 1) / elemsPerBlock;
-            int repeat = (blockCount + 7) / 8;
-            AscendC::SetVectorMask<T, AscendC::MaskMode::COUNTER>(currentLen);
-            AscendC::BlockReduceMax<T, false>(src, src, repeat, AscendC::MASK_PLACEHOLDER, 1, 1, 8);
-            currentLen = blockCount;
+        if constexpr (RTYPE == Sum) {
+            AscendC::WholeReduceSum<T, false>(dst, src, AscendC::MASK_PLACEHOLDER, 1, 1, 1, 8);
         }
-        AscendC::SetVectorMask<T, AscendC::MaskMode::COUNTER>(currentLen);
-        AscendC::WholeReduceMax<T, false>(dst, src, AscendC::MASK_PLACEHOLDER, 1, 1, 1, 8, AscendC::ReduceOrder::ORDER_ONLY_VALUE);
+        if constexpr (RTYPE == Max) {
+            AscendC::WholeReduceMax<T, false>(dst, src, AscendC::MASK_PLACEHOLDER, 1, 1, 1, 8, AscendC::ReduceOrder::ORDER_ONLY_VALUE);
+        }
         AscendC::SetMaskNorm();
         AscendC::ResetMask();  
     }
 
-    template <typename T>
-    __aicore__ inline void ReduceSumHuge(const AscendC::LocalTensor<T>& dst, const AscendC::LocalTensor<T>& src, const int &totalElements) {   
+    template <typename T, ReduceType RTYPE>
+    __aicore__ inline void ReduceHuge(const AscendC::LocalTensor<T>& dst, const AscendC::LocalTensor<T>& src, const int &totalElements) {   
         constexpr int elemsPerBlock = 32 / sizeof(T);
         int currentLen = totalElements;
         AscendC::SetMaskCount();
@@ -303,30 +299,23 @@ private:
             int blockCount = (currentLen + elemsPerBlock - 1) / elemsPerBlock;
             int repeat = (blockCount + 7) / 8;
             AscendC::SetVectorMask<T, AscendC::MaskMode::COUNTER>(currentLen);
-            AscendC::BlockReduceSum<T, false>(src, src, repeat, AscendC::MASK_PLACEHOLDER, 1, 1, 8);
+            if constexpr (RTYPE == Sum) {
+                AscendC::BlockReduceSum<T, false>(src, src, repeat, AscendC::MASK_PLACEHOLDER, 1, 1, 8);
+            }
+            if constexpr (RTYPE == Max) {
+                AscendC::BlockReduceMax<T, false>(src, src, repeat, AscendC::MASK_PLACEHOLDER, 1, 1, 8);
+            }
             currentLen = blockCount;
         }
         AscendC::SetMaskNorm();
         AscendC::ResetMask();  
         // No WholeReduce here, do it later
-        AscendC::Add(dst, dst, src, currentLen);
-    }
-
-    template <typename T>
-    __aicore__ inline void ReduceMaxHuge(const AscendC::LocalTensor<T>& dst, const AscendC::LocalTensor<T>& src, const int &totalElements) {   
-        constexpr int elemsPerBlock = 32 / sizeof(T);
-        int currentLen = totalElements;
-        AscendC::SetMaskCount();
-        while (currentLen > (elemsPerBlock * 8)) {
-            int blockCount = (currentLen + elemsPerBlock - 1) / elemsPerBlock;
-            int repeat = (blockCount + 7) / 8;
-            AscendC::SetVectorMask<T, AscendC::MaskMode::COUNTER>(currentLen);
-            AscendC::BlockReduceMax<T, false>(src, src, repeat, AscendC::MASK_PLACEHOLDER, 1, 1, 8);
-            currentLen = blockCount;
+        if constexpr (RTYPE == Sum) {
+            AscendC::Add(dst, dst, src, currentLen);
         }
-        AscendC::SetMaskNorm();
-        AscendC::ResetMask();  
-        AscendC::Max(dst, dst, src, currentLen);
+        if constexpr (RTYPE == Max) {
+            AscendC::Max(dst, dst, src, currentLen);
+        }
     }
 
 
@@ -381,10 +370,10 @@ private:
             // Output logic, iterate each output result
             for (int i = 0; i < batch; i ++) {
                 if constexpr (CTYPE == Chebyshev) {
-                    ReduceMaxNormal(yLocal[this->bufferNum ++], x2Local[i * this->alignedM], this->M);
+                    ReduceNormal<DTYPE_CALC, Max>(yLocal[this->bufferNum ++], x2Local[i * this->alignedM], this->M);
                 }
                 else {
-                    ReduceSumNormal(outputBuffer[this->bufferNum ++], castTmpBuffer[i * this->alignedM], this->M);
+                    ReduceNormal<DTYPE_CALC, Sum>(outputBuffer[this->bufferNum ++], castTmpBuffer[i * this->alignedM], this->M);
                 }
                 pair ++;
                 if (this->bufferNum == this->copyOutTile || pair == endPair) { // If one output size is reached
@@ -422,10 +411,10 @@ private:
             }
             for (int i = 0; i < batch; i ++) {
                 if constexpr (CTYPE == Chebyshev) {
-                    ReduceMaxNormal(yLocal[this->bufferNum ++], x2Local[i * this->alignedM], this->M);
+                    ReduceNormal<DTYPE_CALC, Max>(yLocal[this->bufferNum ++], x2Local[i * this->alignedM], this->M);
                 }
                 else {
-                    ReduceSumNormal(yLocal[this->bufferNum ++], x2Local[i * this->alignedM], this->M);
+                    ReduceNormal<DTYPE_CALC, Sum>(yLocal[this->bufferNum ++], x2Local[i * this->alignedM], this->M);
                 }
                 pair ++;
                 if (this->bufferNum == this->copyOutTile || pair == endPair) {
@@ -479,10 +468,10 @@ private:
             }
             // Reduce the tile's result into accumulate buffer
             if constexpr (CTYPE == Chebyshev) {
-                ReduceMaxHuge(accumulateBuffer, x2Local, totalElements);
+                ReduceHuge<DTYPE_CALC, Max>(accumulateBuffer, x2Local, totalElements);
             }
             else {
-                ReduceSumHuge(accumulateBuffer, castTmpBuffer, totalElements);
+                ReduceHuge<DTYPE_CALC, Sum>(accumulateBuffer, castTmpBuffer, totalElements);
             }
             if (offset + totalElements >= this->M) { // Reached the last tile, it's time to summarize all the result
                 // First use once WholeReduce to merge the results
@@ -525,10 +514,10 @@ private:
                 AscendC::Power(x2Local, x2Local, p, totalElements);
             }
             if constexpr (CTYPE == Chebyshev) {
-                ReduceMaxHuge(accumulateBuffer, x2Local, totalElements);
+                ReduceHuge<DTYPE_CALC, Max>(accumulateBuffer, x2Local, totalElements);
             }
             else {
-                ReduceSumHuge(accumulateBuffer, x2Local, totalElements);
+                ReduceHuge<DTYPE_CALC, Sum>(accumulateBuffer, x2Local, totalElements);
             }
             if (offset + totalElements >= this->M) {
                 if constexpr (CTYPE == Chebyshev) {
