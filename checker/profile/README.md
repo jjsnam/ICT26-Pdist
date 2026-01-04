@@ -2,7 +2,7 @@
 
 本目录包含了一组用于自动化测试 `Pdist` 算子性能的 Python 脚本，基于 Google Gemini 3.0 Pro 编写。这些脚本能够自动生成测试用例、驱动 `msprof` 进行 NPU 性能采集、解析 profiling 数据，并与 PyTorch CPU 版本进行基准对比。
 
-## 📂 脚本清单
+## 脚本清单
 
 | 脚本文件 | 用途 | 说明 | 输出文件 |
 | :--- | :--- | :--- | :--- |
@@ -11,7 +11,7 @@
 | **`auto_profile_specified.py`** | **快速指定测试** | 仅运行代码中硬编码的几个典型尺寸（如 S/M/L 规模），用于快速验证环境或算子可用性。 | `performance_report.md` |
 | **`auto_profile_baseline.py`** | **PyTorch CPU 基准** | 读取上述生成的 CSV 文件，提取所有已测试的 (N, M, p) 组合，调用 `torch.pdist` 跑一遍 CPU 基准作为对比。 | `baseline_results.csv` |
 
-## 🚀 使用流程
+## 使用流程
 
 请确保你的当前工作目录是 `checker/` 根目录（即 `run.sh` 所在的目录），然后通过路径调用这些脚本。
 
@@ -64,7 +64,7 @@ python3 profile/auto_profile_baseline.py
 
 > **注意**：该脚本会自动读取 `benchmark_results.csv` 和 `benchmark_results_large.csv`，无需手动指定参数。
 
-## 📊 输出结果说明
+## 输出结果说明
 
 所有测试结果将保存为 CSV 格式，包含以下字段：
 
@@ -79,7 +79,7 @@ python3 profile/auto_profile_baseline.py
 
 你可以直接将生成的 CSV 文件导入 Excel 或使用 Python `pandas` / `matplotlib` 进行可视化绘图，分析算子在不同规模下的性能趋势（如线性度、吞吐量瓶颈等）。
 
-## ⚠️ 注意事项
+## 注意事项
 
 1. **运行路径**：脚本内部会检测 `./run.sh` 是否存在，**必须在 `checker` 目录下运行**，不要进入 `profile` 目录内运行。
 2. **日志清理**：脚本启动时会自动清理目录下的 `OP*` profiling 日志文件夹，请注意备份重要数据。
