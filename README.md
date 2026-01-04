@@ -4,6 +4,9 @@
 
 本项目基于 [AscendC 工程化算子开发](https://www.hiascend.com/document/detail/zh/CANNCommunityEdition/850alpha002/opdevg/Ascendcopdevg/atlas_ascendc_10_00046.html) 构建。
 
+* 项目背景：[Pdist 算子优化——任务书](./docs/Pdist%20算子优化——任务书.pdf)
+* 技术报告：[Proposal-Pdist](./docs/ICT25_1_Proposal_Pdist.pdf)
+
 ## 1. 算子规格与定义
 
 ### 1.1 数学定义

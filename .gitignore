@@ -13,3 +13,4 @@ checker/output/
 checker/OPPROF*
 performance_report.md
 *.csv
+__pycache__/
