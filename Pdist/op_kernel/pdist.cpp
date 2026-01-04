@@ -40,7 +40,7 @@ enum ReduceType { Sum = 0, Max = 1 };
 template<typename DTYPE, DataScale DSCALE, CalcType CTYPE>
 class KernelPdist{
     // First determin the datatype used in calculation
-    // Always the same type ad DTYPE, except for FP16 with cast requirements
+    // Always the same type as DTYPE, except for FP16 with cast requirements
     using DTYPE_CALC = std::conditional_t<CTYPE == Chebyshev, DTYPE_Y, 
     std::conditional_t<std::is_same_v<DTYPE, half>, float, DTYPE_Y>>;
 public:

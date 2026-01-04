@@ -11,3 +11,5 @@ checker/input/
 checker/output/
 **/PROF*/
 checker/OPPROF*
+performance_report.md
+*.csv

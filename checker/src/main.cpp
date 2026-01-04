@@ -14,6 +14,8 @@
 #include <cstdint>
 #include <iostream>
 
+#include <cstdlib>
+
 #include "acl/acl.h"
 #include "common.h"
 #include "op_runner.h"
@@ -156,6 +158,11 @@ aclDataType ParseDataType(const std::string &dataTypeStr) {
 }
 
 int main(int argc, char **argv) {
+    const char* env_device_id = std::getenv("ASCEND_DEVICE_ID");
+    if (env_device_id != nullptr) {
+        deviceId = std::atoi(env_device_id);
+    }
+    
     g_conf.N = std::stoi(argv[1]);
     g_conf.M = std::stoi(argv[2]);
     g_conf.p = atof(argv[3]);

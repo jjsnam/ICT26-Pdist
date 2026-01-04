@@ -1,5 +1,6 @@
 #!/bin/bash
 source config.txt
+export ASCEND_DEVICE_ID=7
 
 CURRENT_DIR=$(
     cd $(dirname ${BASH_SOURCE:-$0})
