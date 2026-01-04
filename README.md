@@ -119,11 +119,12 @@ bash build.sh
 
 ```ini
 # data_type: float32, float16
+# data_range: S(-1,1), M(1.0, 10), L(-1000, 1000), 
 N=1024
 M=512
 p=2.0
 data_type=float32
-data_range=10.0
+data_range=M
 
 ```
 
