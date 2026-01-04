@@ -1,109 +1,167 @@
-# Pdist 算子优化 (Ascend C)
+# AscendC Pdist 算子
 
-本项目基于华为昇腾 CANN 架构，使用 Ascend C 编程语言实现了一个自定义工程化算子 `Pdist`。该算子用于计算输入矩阵中每两行向量之间的 -范数距离。
+基于华为昇腾 CANN 架构，使用 Ascend C 编程语言实现的高性能 `Pdist` (Pairwise Distance) 算子，与 Pytorch 相关算子严格对齐。该算子用于计算输入矩阵中任意两行向量之间的 p-范数距离，广泛应用于聚类分析、计算机视觉（ReID）及自然语言处理等领域。
 
-## 1. 算子介绍
+本项目基于 [AscendC 工程化算子开发](https://www.hiascend.com/document/detail/zh/CANNCommunityEdition/850alpha002/opdevg/Ascendcopdevg/atlas_ascendc_10_00046.html) 构建。
 
-`Pdist` 算子计算一个  矩阵中行向量之间的对等距离（Pairwise Distance）。
+## 1. 算子规格与定义
 
-* **输入**: 一个形状为  的张量 。
-* **输出**: 一个形状为  的张量 ，包含所有行对之间的距离。
-* **属性 `p`**: 范数阶数。
-    * : 曼哈顿距离 (L1)。
-    * : 欧几里得距离 (L2)。
-    * : 最大值距离 (Linf)。
-    * : 通用 -范数距离。
+### 1.1 数学定义
 
+给定输入矩阵 $X \in \mathbb{R}^{N \times M}$，其中 $N$ 为样本数，$M$ 为特征维度。算子计算任意两行 $x_i, x_j (0 \le i < j < N)$ 之间的 $p$-范数距离：
 
+$$y_{k} = \|x_i - x_j\|_p = \left( \sum_{m=0}^{M-1} |x_{i,m} - x_{j,m}|^p \right)^{1/p}$$
 
-### 算子规格
+输出 $Y$ 为一维压缩向量，长度为 $N(N-1)/2$。
 
+### 1.2 支持属性
+| 属性 | 值 | 说明 |
+| :--- | :--- | :--- |
+| **p** | $p=1$ | 曼哈顿距离 (Manhattan), 对应 L1 范数 |
+| **p** | $p=2$ | 欧几里得距离 (Euclidean), 对应 L2 范数 |
+| **p** | $p=\infty$ | 切比雪夫距离 (Chebyshev), 对应 Linf 范数 |
+| **p** | $p \in (0, \infty)$ | 通用 Minkowski 距离（代码里称作 General） |
+
+### 1.3 输入输出规格
 | 参数 | 类型 | 格式 | 说明 |
-| --- | --- | --- | --- |
-| 输入 x | float16, float32 | ND | 形状为 (N, M) |
-| 输出 y | float16, float32 | ND | 形状为 (N*(N-1)/2, ) |
-| 属性 p | float | - | 默认为 2.0 |
+| :--- | :--- | :--- | :--- |
+| **Input x** | float16, float32 | ND | 形状 $(N, M)$, 支持超大 $M$ 维度 |
+| **Output y** | float16, float32 | ND | 形状 $(\frac{N(N-1)}{2})$ |
 
-## 2. 项目结构
+---
+
+## 2. 核心特性与优化
+
+本项目针对 Ascend NPU 架构进行了深度优化，并尽可能保证了除 Ascend 910 外其他 Ascend 平台的支持性，核心技术点如下：
+
+### 🚀 性能优化
+* **基于逆向二分查找的负载均衡**:
+    * 针对上三角矩阵计算任务随行号递减导致的负载不均问题，Kernel 内部实现了基于二分查找的坐标映射算法。
+    * 将总任务线性均分给各 AI Core，核心内通过 O(log N) 复杂度快速反解 `(i, j)` 坐标，实现多核负载均衡。
+* **多级 Tiling 策略**:
+    * **Normal Mode**: 当一行数据能完整装入 UB (Unified Buffer) 时，采用 Batch 处理策略，最大化内存搬运与计算的并行度。
+    * **Huge Mode**: 针对超长特征向量 (M 极大)，自动切换至分块累积 (Split-Accumulate) 模式，利用片上缓存暂存中间结果，突破硬件内存限制。
+* **标量优化**: 减少常驻 UB 张量的入出队操作，减少标量同步和开销以及流水线打断。
+* **批量处理**: 充分利用硬件性能，增加单次吞吐量，减少流水线中断，充分利用内存带宽。
+
+### 🛠 工程化设计
+* **混合精度计算**: 针对 Float16 输入，计算流采用 FP32 累加 (Cast-on-the-fly) 以保证精度，输出回转 FP16。
+* **双缓冲流水线**: 全面启用 `Double Buffering`，实现 GM 数据搬运与 Vector 计算的完美并行掩盖。
+* **内存对齐**: 强制 32 字节对齐访问，针对非对齐数据自动进行 Padding 处理，保障访存效率。
+* **模板元编程 (Template Metaprogramming)**:
+    * 利用 C++ 模板技术，在编译期生成针对不同 p 值（如 p=2 时移除幂运算改为乘法）和数据规模的特化内核，消除运行时分支判断开销。
+    * 减少代码重复性，使项目更加整洁。
+
+更详细的实现细节敬请参考 [op_host/pdist_tiling.h](./Pdist/op_host/pdist_tiling.h)、[op_host/pdist.cpp](./Pdist/op_host/pdist.cpp)、[op_kernel/pdist.cpp](./Pdist/op_kernel/pdist.cpp)，我们已经对关键部分进行了注释。
+
+---
+
+## 3. 项目结构
 
 ```text
-├── Pdist.json            # 算子原型定义文件
+├── Pdist.json             # 算子原型定义 (IR)
 ├── Pdist/
-│   ├── op_host/          # Host 侧代码：Tiling 实现及原型注册
-│   ├── op_kernel/        # Device 侧代码：内核计算逻辑
-│   ├── build.sh          # 编译一键化脚本
-│   └── CMakeLists.txt    # 算子工程编译配置
-└── checker/              # 算子功能验证工具 (AclNN 调用方式)
-    ├── config.txt        # 验证参数配置文件
-    ├── run.sh            # 运行验证脚本
-    └── scripts/          # 数据生成与校验脚本
+│   ├── op_host/           # Host 侧代码
+│   │   ├── pdist.cpp      # Tiling 策略逻辑 (Normal/Huge 分支判定)
+│   │   └── pdist_tiling.h # Tiling 数据结构定义
+│   ├── op_kernel/         # Device 侧代码
+│   │   └── pdist.cpp      # 核心计算逻辑 (二分查找、计算模板特化)
+│   ├── build.sh           # 一键编译安装脚本
+│   └── CMakeLists.txt     # CMake 编译配置
+└── checker/               # 算子验证工具 (基于 AclNN)
+    ├── config.txt         # 测试用例配置文件 (N, M, p, dtype)
+    ├── run.sh             # 验证运行脚本
+    ├── profile/           # 自动 Profile 脚本
+    └── scripts/           # Python 数据生成与真值比对脚本
 
 ```
 
-## 3. 环境准备
+---
 
-在编译运行之前，请确保已安装 CANN 软件栈并设置环境变量：
+## 4. 编译与安装 (Pdist)
+
+### 4.1 环境依赖
+
+* Huawei CANN Toolkit (Version >= 7.0)
+* Ascend 910B 单卡 (或仿真环境，理论上其他 Ascend 设备也能编译运行此项目)
+* CMake >= 3.16
+* ARM 架构 host 环境，否则需要更改 [CMakePresets.json](./Pdist/CMakePresets.json#L58) 并设置交叉编译工具链。
 
 ```bash
-# 请根据实际安装路径修改
+# 设置环境变量 (根据实际安装路径调整)
 source /usr/local/Ascend/ascend-toolkit/set_env.bash
-
 ```
 
-## 4. 编译与安装
+### 4.2 一键编译安装
 
-请注意更改 `Pdist/CMakePresets.json` 的相关值，替换为运行环境的真实路径。
+项目提供了增强版构建脚本，支持编译、打包及自动注册算子到系统 Vendor 路径。
 
-项目中的 `Pdist/build.sh` 已经过增强，支持编译后自动安装到系统路径。
+**重要**：在正式开始编译前，请将 [CMakePresets.json](./Pdist/CMakePresets.json#L42) 的 `ASCEND_CANN_PACKAGE_PATH` 值改为您的 CANN 工具链环境。
 
-1. 进入算子工程目录：
 ```bash
 cd Pdist
-
-```
-
-
-2. 执行编译安装脚本：
-```bash
 bash build.sh
-
 ```
 
+> **提示**: 脚本会自动生成 `custom_opp_*.run` 包并静默安装。安装成功后，算子即可通过 PyTorch 插件或 ACL 接口调用。
 
-*该脚本会调用 CMake 完成编译，生成 `.run` 安装包，并自动执行静默安装，将算子 API 注册到 vendor 路径下。*
+---
 
 ## 5. 算子验证 (Checker)
 
-`checker` 目录提供了一个基于 `aclnn` 调用方式的验证环境。
+`checker` 模块基于 [AscendCLNNInvocation](https://gitee.com/ascend/samples/tree/master/operator/ascendc/0_introduction/1_add_frameworklaunch/AclNNInvocation) 进一步修改，提供了一个轻量级的 C++ 测试框架，无需编写完整应用即可验证算子正确性。
 
-### 5.1 配置参数
+建议使用 CANN 相关工具包自带的 Python 环境。
 
-修改 `checker/config.txt` 来调整测试规格（如  的值）。
+### 5.1 配置测试用例
 
-### 5.2 运行验证
+编辑 `checker/config.txt` 修改测试参数：
 
-1. 第一次运行前需编译验证程序：
-```bash
-cd checker
-bash compile.sh
+```ini
+# data_type: float32, float16
+N=1024
+M=512
+p=2.0
+data_type=float32
+data_range=10.0
 
 ```
 
+### 5.2 编译与运行
 
-2. 执行测试：
 ```bash
+cd checker
+
+# 1. 编译测试程序 (仅需执行一次)
+bash compile.sh
+
+# 2. 运行测试 (自动生成数据 -> 运行算子 -> 比对真值)
 bash run.sh
 
 ```
 
+### 5.3 性能分析
 
-*该脚本会自动生成输入数据、调用算子 API、并对比算子输出与 Python 计算的真值。*
+使用 `msprof` 及其子工具分析算子在 NPU 上的执行性能：
+
+```bash
+msprof op ./run.sh
+```
+
+或直接使用 ```checker/profile``` 下的各 `auto_profile` 脚本。使用方法详见 [#Link](./checker/profile/README.md)
+
+---
+
+## 6. 版本历史
+
+* **v2.0 (Current)**:
+    * 重构 Tiling 逻辑，引入 Huge Mode 支持超大数据。
+    * 优化规约逻辑，使用 `BlockReduce + WholeReduce` 提升效率。
+    * 进一步优化算子性能。
 
 
-如果需要测试算子性能，可以直接运行 `msprof op ./run.sh` 并查看相关性能结果。
+* **v1.0 (2025-12-23 checkpoint)**: 
+    * 基础功能实现，支持 FP16/FP32 及各类特化和通用 p 范数计算。
+    * 引入双缓冲等优化技术。
 
-## 6. 实现细节
-
-* **Tiling 策略**: 根据输入  和  的大小，自动计算每个 AI Core 处理的行对任务量，并充分利用 Double Buffer 提高搬运与计算的并行性。
-* **内存优化**: 针对不同  值（1, 2, , 通用）实现了专门的内核计算分支，以获得最佳性能。
-* **对齐处理**: 内部处理了 32 字节对齐，确保在昇腾平台上高效访问 Global Memory。
+---
