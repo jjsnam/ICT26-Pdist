@@ -31,8 +31,6 @@ $$y_{k} = \|x_i - x_j\|_p = \left( \sum_{m=0}^{M-1} |x_{i,m} - x_{j,m}|^p \right
 | **Input x** | float16, float32 | ND | 形状 $(N, M)$, 支持超大 $M$ 维度 |
 | **Output y** | float16, float32 | ND | 形状 $(\frac{N(N-1)}{2})$ |
 
----
-
 ## 2. 核心特性与优化
 
 本项目针对 Ascend NPU 架构进行了深度优化，并尽可能保证了除 Ascend 910 外其他 Ascend 平台的支持性，核心技术点如下：
@@ -57,8 +55,6 @@ $$y_{k} = \|x_i - x_j\|_p = \left( \sum_{m=0}^{M-1} |x_{i,m} - x_{j,m}|^p \right
 
 更详细的实现细节敬请参考 [op_host/pdist_tiling.h](./Pdist/op_host/pdist_tiling.h)、[op_host/pdist.cpp](./Pdist/op_host/pdist.cpp)、[op_kernel/pdist.cpp](./Pdist/op_kernel/pdist.cpp)，我们已经对关键部分进行了注释。
 
----
-
 ## 3. 项目结构
 
 ```text
@@ -78,8 +74,6 @@ $$y_{k} = \|x_i - x_j\|_p = \left( \sum_{m=0}^{M-1} |x_{i,m} - x_{j,m}|^p \right
     └── scripts/           # Python 数据生成与真值比对脚本
 
 ```
-
----
 
 ## 4. 编译与安装 (Pdist)
 
@@ -107,8 +101,6 @@ bash build.sh
 ```
 
 > **提示**: 脚本会自动生成 `custom_opp_*.run` 包并静默安装。安装成功后，算子即可通过 PyTorch 插件或 ACL 接口调用。
-
----
 
 ## 5. 算子验证 (Checker)
 
@@ -146,6 +138,18 @@ bash run.sh
 
 ### 5.3 性能分析
 
+首先需要确保安装了 CANN 软件包并设置了 `msprof` 类工具的环境变量 `PATH`：
+
+```bash
+export PATH=$INSTALL_DIR/python/site-packages/bin:$PATH
+```
+
+其中 `$INSTALL_DIR` 是 Ascend 工具包的路径，比如
+
+```bash
+export INSTALL_DIR=~/anaconda3/envs/cann/Ascend/ascend-toolkit/latest/
+```
+
 使用 `msprof` 及其子工具分析算子在 NPU 上的执行性能：
 
 ```bash
@@ -153,8 +157,6 @@ msprof op ./run.sh
 ```
 
 或直接使用 ```checker/profile``` 下的各 `auto_profile` 脚本。使用方法详见 [#Link](./checker/profile/README.md)
-
----
 
 ## 6. 版本历史
 
@@ -167,5 +169,3 @@ msprof op ./run.sh
 * **v1.0 (2025-12-23 checkpoint)**: 
     * 基础功能实现，支持 FP16/FP32 及各类特化和通用 p 范数计算。
     * 引入双缓冲等优化技术。
-
----
