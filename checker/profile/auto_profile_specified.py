@@ -17,7 +17,8 @@ P_VALUES = [
     "1.0",
     "2.0",
     "inf",
-    "3.0"
+    "3.0",
+    "0.0"
 ]
 
 DTYPES = [
@@ -25,7 +26,7 @@ DTYPES = [
     "float32"
 ]
 
-DATA_RANGE = "S"
+DATA_RANGE = "M"
 # ===========================================
 
 def update_config(n, m, p, dtype):

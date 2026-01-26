@@ -2,13 +2,15 @@
  * @file pdist.cpp
  * @authors Tianyang Liu (@jjsnam), Chen Xu (@Sushidesu486)
  * @brief kernel implementation of AscendC p-distance operator
- * @version 2.0 
- * @note Updated after checkpoint at 2025-12-22
- * @date 2025-12-30
- * 
- * @copyright Copyright (c) 2025 ZJUSCT
+ * @version 2.1.0 
+ * @note Updated after training camp at 2026-01-26
+ * @date 2026-01-26
+ *
+ * @copyright Copyright (c) 2026 ZJUSCT
  * This implementation is developed by the authors using the AscendC programming model and APIs provided by Huawei Technologies Co., Ltd.
  * AscendC and Ascend are trademarks of Huawei Technologies Co., Ltd.
+ * 
+ * Thanks to @Chenhzjs for guidance of Hamming pdist implementation.
  */
 #include "kernel_operator.h"
 
@@ -22,7 +24,7 @@ static constexpr int ACC_BUF_SIZE = TILE_HUGE * ACC_BLOCK_SIZE; // Total buffer'
  * @brief Same declaration of DataScale and CalcType, see op_host/pdist.cpp for detail
  */
 enum DataScale { Normal = 0, Huge = 1 };
-enum CalcType { General = 0, Manhattan = 1, Euclidean = 2, Chebyshev = 3 };
+enum CalcType { Hamming = 0, Manhattan = 1, Euclidean = 2, Chebyshev = -1, General = 3 };
 /**
  * @brief Reduce type enum declaration for manually implemented reduce logics
  */
@@ -41,8 +43,8 @@ template<typename DTYPE, DataScale DSCALE, CalcType CTYPE>
 class KernelPdist{
     // First determin the datatype used in calculation
     // Always the same type as DTYPE, except for FP16 with cast requirements
-    using DTYPE_CALC = std::conditional_t<CTYPE == Chebyshev, DTYPE_Y, 
-    std::conditional_t<std::is_same_v<DTYPE, half>, float, DTYPE_Y>>;
+    using DTYPE_CALC = std::conditional_t<(CTYPE == Chebyshev || CTYPE == Hamming), DTYPE_Y, 
+                           std::conditional_t<std::is_same_v<DTYPE, half>, float, DTYPE_Y>>;
 public:
     __aicore__ inline KernelPdist() {}
     __aicore__ inline ~KernelPdist() {}
@@ -324,6 +326,7 @@ private:
  *
  * @note We use constexpr() to merge four kinds of calculation into one function
  * @details Below is each kind of calculation's explicit pipeline
+ * - Hamming: Sub -> Abs -> Reinterpret Cast (to integer) -> MinScalar(1) (then only 0 and 1 exists) -> Cast (back to DTYPE) -> ReduceSum
  * - General: Sub -> Abs (-> Cast) -> Power(p) -> ReduceSum -> Power(1/p) (-> Cast)
  * - Manhattan: Sub -> Abs (-> Cast) -> ReduceSum (-> Cast)
  * - Euclidean: Sub (-> Cast) -> Mul -> ReduceSum -> Sqrt (-> Cast)
@@ -357,7 +360,7 @@ private:
             if constexpr (CTYPE != Euclidean) {
                 AscendC::Abs(x2Local, x2Local, batch * this->alignedM);
             }
-            if constexpr (CTYPE != Chebyshev) {
+            if constexpr (CTYPE != Chebyshev && CTYPE != Hamming) {
                 AscendC::Cast(castTmpBuffer, x2Local, AscendC::RoundMode::CAST_NONE, batch * this->alignedM);
             }
             if constexpr (CTYPE == Euclidean) {
@@ -367,10 +370,21 @@ private:
                 DTYPE_CALC p = static_cast<DTYPE_CALC>(pVal);
                 AscendC::Power(castTmpBuffer, castTmpBuffer, p, batch * this->alignedM);
             }
+            if constexpr (CTYPE == Hamming) {
+                // We only care about whether the item is 0 or not
+                // Since the floating representation of 0 is all bit 0, then we can use integer to simplify the computation
+                // After minimizing with 1, the item can be only int 0 or 1, then just cast back to floating representation
+                AscendC::LocalTensor<int16_t> TempLocal = x2Local.ReinterpretCast<int16_t>();
+                AscendC::Mins(TempLocal, TempLocal, static_cast<int16_t>(1), batch * this->alignedM);
+                AscendC::Cast(x2Local, TempLocal, AscendC::RoundMode::CAST_TRUNC, batch * this->alignedM);
+            }
             // Output logic, iterate each output result
             for (int i = 0; i < batch; i ++) {
                 if constexpr (CTYPE == Chebyshev) {
                     ReduceNormal<DTYPE_CALC, Max>(yLocal[this->bufferNum ++], x2Local[i * this->alignedM], this->M);
+                }
+                else if constexpr (CTYPE == Hamming) {
+                    ReduceNormal<DTYPE_CALC, Sum>(yLocal[this->bufferNum ++], x2Local[i * this->alignedM], this->M);
                 }
                 else {
                     ReduceNormal<DTYPE_CALC, Sum>(outputBuffer[this->bufferNum ++], castTmpBuffer[i * this->alignedM], this->M);
@@ -385,7 +399,7 @@ private:
                         DTYPE_CALC Rp = static_cast<DTYPE_CALC>(1 / pVal);
                         AscendC::Power(outputBuffer, outputBuffer, Rp, this->bufferNum);
                     }
-                    if constexpr (CTYPE != Chebyshev) {
+                    if constexpr (CTYPE != Chebyshev && CTYPE != Hamming) {
                         AscendC::Cast(yLocal, outputBuffer, AscendC::RoundMode::CAST_NONE, this->bufferNum);
                     }
                     outQueY.EnQue(yLocal);
@@ -408,6 +422,11 @@ private:
             if constexpr (CTYPE == General) {
                 DTYPE_CALC p = static_cast<DTYPE_CALC>(pVal);
                 AscendC::Power(x2Local, x2Local, p, batch * this->alignedM);
+            }
+            if constexpr (CTYPE == Hamming) {
+                AscendC::LocalTensor<int32_t> TempLocal = x2Local.ReinterpretCast<int32_t>();
+                AscendC::Mins(TempLocal, TempLocal, 1, batch * this->alignedM);
+                AscendC::Cast(x2Local, TempLocal, AscendC::RoundMode::CAST_TRUNC, batch * this->alignedM);
             }
             for (int i = 0; i < batch; i ++) {
                 if constexpr (CTYPE == Chebyshev) {
@@ -456,7 +475,7 @@ private:
             if constexpr (CTYPE != Euclidean) {
                 AscendC::Abs(x2Local, x2Local, totalElements);
             }
-            if constexpr (CTYPE != Chebyshev) {
+            if constexpr (CTYPE != Chebyshev && CTYPE != Hamming) {
                 AscendC::Cast(castTmpBuffer, x2Local, AscendC::RoundMode::CAST_NONE, totalElements);
             }
             if constexpr (CTYPE == Euclidean) {
@@ -466,9 +485,17 @@ private:
                 DTYPE_CALC p = static_cast<DTYPE_CALC>(pVal);
                 AscendC::Power(castTmpBuffer, castTmpBuffer, p, totalElements);
             }
+            if constexpr (CTYPE == Hamming) {
+                AscendC::LocalTensor<int16_t> TempLocal = x2Local.ReinterpretCast<int16_t>();
+                AscendC::Mins(TempLocal, TempLocal, static_cast<int16_t>(1), totalElements);
+                AscendC::Cast(x2Local, TempLocal, AscendC::RoundMode::CAST_TRUNC, totalElements);
+            }
             // Reduce the tile's result into accumulate buffer
             if constexpr (CTYPE == Chebyshev) {
                 ReduceHuge<DTYPE_CALC, Max>(accumulateBuffer, x2Local, totalElements);
+            }
+            else if constexpr (CTYPE == Hamming) {
+                ReduceHuge<DTYPE_CALC, Sum>(accumulateBuffer, x2Local, totalElements);
             }
             else {
                 ReduceHuge<DTYPE_CALC, Sum>(accumulateBuffer, castTmpBuffer, totalElements);
@@ -491,7 +518,7 @@ private:
                         DTYPE_CALC Rp = static_cast<DTYPE_CALC>(1 / pVal);
                         AscendC::Power(outputBuffer, outputBuffer, Rp, this->bufferNum);
                     }
-                    if constexpr (CTYPE != Chebyshev) {
+                    if constexpr (CTYPE != Chebyshev && CTYPE != Hamming) {
                         AscendC::Cast(yLocal, outputBuffer, AscendC::RoundMode::CAST_NONE, this->bufferNum);
                     }
                     outQueY.EnQue(yLocal);
@@ -512,6 +539,11 @@ private:
             if constexpr (CTYPE == General) {
                 DTYPE_CALC p = static_cast<DTYPE_CALC>(pVal);
                 AscendC::Power(x2Local, x2Local, p, totalElements);
+            }
+            if constexpr (CTYPE == Hamming) {
+                AscendC::LocalTensor<int32_t> TempLocal = x2Local.ReinterpretCast<int32_t>();
+                AscendC::Mins(TempLocal, TempLocal, 1, totalElements);
+                AscendC::Cast(x2Local, TempLocal, AscendC::RoundMode::CAST_TRUNC, totalElements);
             }
             if constexpr (CTYPE == Chebyshev) {
                 ReduceHuge<DTYPE_CALC, Max>(accumulateBuffer, x2Local, totalElements);
@@ -598,10 +630,11 @@ __aicore__ inline void RunOp(GM_ADDR &x, GM_ADDR &y, PdistTilingData &tiling_dat
 template<typename DTYPE, DataScale DSCALE>
 __aicore__ inline void DispatchPType(GM_ADDR &x, GM_ADDR &y, PdistTilingData &tiling_data) {
     switch (tiling_data.pType) {
-        case General: RunOp<DTYPE, DSCALE, General>(x, y, tiling_data); break;
+        case Hamming: RunOp<DTYPE, DSCALE, Hamming>(x, y, tiling_data); break;
         case Manhattan: RunOp<DTYPE, DSCALE, Manhattan>(x, y, tiling_data); break;
         case Euclidean: RunOp<DTYPE, DSCALE, Euclidean>(x, y, tiling_data); break;
         case Chebyshev: RunOp<DTYPE, DSCALE, Chebyshev>(x, y, tiling_data); break;
+        case General: RunOp<DTYPE, DSCALE, General>(x, y, tiling_data); break;
         default: break;
     }
 }

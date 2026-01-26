@@ -2,9 +2,9 @@
  * @file pdist.cpp
  * @author Tianyang Liu (@jjsnam)
  * @brief host (mainly tiling) implementation of AscendC p-distance operator
- * @version 2.0 
- * @note Updated after checkpoint at 2025-12-22
- * @date 2025-12-30
+ * @version 2.1.0 
+ * @note Updated after training camp at 2026-01-26
+ * @date 2026-01-26
  * 
  * @copyright Copyright (c) 2025 ZJUSCT
  * This implementation is developed by the authors using the AscendC programming model and APIs provided by Huawei Technologies Co., Ltd.
@@ -38,7 +38,7 @@ static constexpr int ACC_BUF_SIZE = TILE_HUGE * ACC_BLOCK_SIZE; // Total buffer'
  *                    at least one total row of size M's calculation
  *          - Huge: the other conditions where the Normal logic fails (more tiling is needed)
  */
-enum CalcType { General = 0, Manhattan = 1, Euclidean = 2, Chebyshev = 3 };
+enum CalcType { Hamming = 0, Manhattan = 1, Euclidean = 2, Chebyshev = -1, General = 3 };
 enum DataScale { Normal = 0, Huge = 1 };
 
 namespace optiling {
@@ -64,7 +64,8 @@ static ge::graphStatus TilingFunc(gert::TilingContext* context) { // To get tili
     // Choose calculation kernel's type
     CalcType pType;
     if (pVal < 0.0) return ge::GRAPH_FAILED; // p must be non-negative (as specified by pytorch)
-    if (fabs(pVal - 1.0) < ZERO) pType = Manhattan; // p = 1
+    if (fabs(pVal) < ZERO) pType = Hamming; // p = 1
+    else if (fabs(pVal - 1.0) < ZERO) pType = Manhattan; // p = 1
     else if (fabs(pVal - 2.0) < ZERO) pType = Euclidean; // p = 2
     else if (std::isinf(pVal)) pType = Chebyshev; // p = \inf
     else pType = General; // other p value
